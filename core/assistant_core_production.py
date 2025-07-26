@@ -1,6 +1,6 @@
 """
 Gideon AI Assistant Core - PRODUCTION VERSION
-Optimized AI responses with robust fallbacks and context memory
+100% LOCAL avec Ollama - AUCUNE dépendance OpenAI
 """
 
 import time
@@ -11,13 +11,7 @@ from collections import deque
 from dataclasses import dataclass
 import json
 
-# Safe imports with fallbacks
-try:
-    from openai import OpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-
+# Ollama local - AUCUNE dépendance externe
 try:
     import requests
     HAS_REQUESTS = True
@@ -25,6 +19,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 from config import config
+
 
 @dataclass
 class ConversationContext:
@@ -36,106 +31,165 @@ class ConversationContext:
     success: bool = True
     fallback_used: bool = False
 
-class IntelligentFallbacks:
-    """Système de fallbacks intelligents pour Gideon"""
+
+class OllamaLocalClient:
+    """Client Ollama 100% local - Aucune dépendance externe"""
     
     def __init__(self):
-        self.logger = logging.getLogger("GideonFallbacks")
+        self.base_url = "http://localhost:11434"
+        self.available_models = ["mistral:7b", "llama3:8b", "phi3:mini"]
+        self.default_model = "mistral:7b"
+        self.is_available = False
+        self.logger = logging.getLogger("OllamaClient")
         
-        # Réponses préprogrammées par catégorie
-        self.fallback_responses = {
+        # Test de connectivité Ollama
+        self._test_connection()
+    
+    def _test_connection(self) -> bool:
+        """Test si Ollama est disponible"""
+        if not HAS_REQUESTS:
+            return False
+            
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=3)
+            if response.status_code == 200:
+                self.is_available = True
+                self.logger.info("✅ Ollama connecté et fonctionnel")
+                return True
+        except Exception as e:
+            self.logger.warning(f"⚠️ Ollama non disponible: {e}")
+        
+        self.is_available = False
+        return False
+    
+    def chat_completion(self, messages: List[Dict], model: str = None) -> Dict:
+        """Génère une réponse via Ollama"""
+        if not self.is_available or not HAS_REQUESTS:
+            return {"error": "Ollama non disponible"}
+        
+        model = model or self.default_model
+        
+        # Construire le prompt à partir des messages
+        prompt = ""
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                prompt += f"System: {content}\n"
+            elif role == "user":
+                prompt += f"User: {content}\n"
+            elif role == "assistant":
+                prompt += f"Assistant: {content}\n"
+        
+        prompt += "Assistant: "
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "max_tokens": 150
+                    }
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "choices": [{
+                        "message": {
+                            "content": data.get("response", "")
+                        }
+                    }]
+                }
+            else:
+                return {"error": f"Ollama HTTP {response.status_code}"}
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur Ollama: {e}")
+            return {"error": str(e)}
+
+
+class IntelligentFallbacks:
+    """Système de fallbacks intelligents sans aucune dépendance externe"""
+    
+    def __init__(self):
+        self.responses = {
+            # Réponses contextuelles
             'greeting': [
-                "Hello! I'm Gideon, your AI assistant. How can I help you today?",
-                "Greetings! I'm ready to assist you with any questions or tasks.",
-                "Hi there! What can I do for you today?"
+                "Hello! I'm Gideon, your local AI assistant. How can I help you today?",
+                "Hi there! I'm running entirely on your system. What can I do for you?",
+                "Greetings! Your local AI assistant is ready to assist you."
             ],
-            'weather': [
-                "I'd need to check the weather service for that information. Please try asking about the weather again in a moment.",
-                "Weather services seem to be unavailable right now. Would you like me to help with something else?"
+            'farewell': [
+                "Goodbye! Feel free to ask me anything anytime.",
+                "See you later! I'll be here when you need me.",
+                "Take care! I'm always ready to help."
             ],
             'time': [
-                f"It's currently {time.strftime('%I:%M %p')} on {time.strftime('%A, %B %d, %Y')}.",
-                f"The current time is {time.strftime('%H:%M')} today."
+                f"The current time is {time.strftime('%H:%M:%S')}",
+                f"It's currently {time.strftime('%I:%M %p')}",
+                f"Right now it's {time.strftime('%H:%M')}"
             ],
-            'capabilities': [
-                "I'm Gideon, an AI assistant inspired by the Flash series. I can help with questions, conversations, and various tasks. What would you like to know?",
-                "I can assist with information, answer questions, and have conversations. I'm designed to be helpful, accurate, and efficient."
+            'weather': [
+                "I don't have current weather data, but I can help you find weather services.",
+                "For weather information, I'd recommend checking your local weather app.",
+                "I can't access weather data right now, but I can help with other tasks."
+            ],
+            'general': [
+                "I'm here to help! Could you be more specific about what you need?",
+                "I'm your local AI assistant. How can I assist you today?",
+                "I'm ready to help with various tasks. What would you like to do?"
             ],
             'error': [
-                "I'm experiencing some technical difficulties right now. Please try rephrasing your question.",
-                "Sorry, I'm having trouble processing that request at the moment. Could you try asking differently?",
-                "There seems to be a temporary issue with my AI services. Is there something else I can help with?"
-            ],
-            'unclear': [
-                "I'm not sure I understand completely. Could you provide more details or rephrase your question?",
-                "That's an interesting question, but I need a bit more context to give you a helpful answer.",
-                "Could you clarify what you're looking for? I want to make sure I give you the right information."
-            ],
-            'goodbye': [
-                "Goodbye! Feel free to call on me anytime you need assistance.",
-                "Until next time! I'll be here whenever you need help.",
-                "Farewell! Have a great day!"
+                "I'm experiencing some technical difficulties. Let me try a different approach.",
+                "Something went wrong there. Could you please rephrase your request?",
+                "I encountered an issue processing that. Can you try asking differently?"
             ]
         }
     
-    def categorize_input(self, user_input: str) -> str:
-        """Catégoriser l'input utilisateur pour fallback approprié"""
-        input_lower = user_input.lower().strip()
+    def get_contextual_response(self, user_input: str) -> str:
+        """Génère une réponse contextuelle intelligente"""
+        input_lower = user_input.lower()
         
-        # Greetings
-        if any(word in input_lower for word in ['hello', 'hi', 'hey', 'good morning', 'good evening']):
-            return 'greeting'
-        
-        # Weather
-        if any(word in input_lower for word in ['weather', 'temperature', 'rain', 'sunny', 'cloudy']):
-            return 'weather'
-        
-        # Time
-        if any(word in input_lower for word in ['time', 'date', 'day', 'hour', 'clock']):
-            return 'time'
-        
-        # Capabilities
-        if any(word in input_lower for word in ['what can you', 'what do you', 'who are you', 'help me', 'assist']):
-            return 'capabilities'
-        
-        # Goodbye
-        if any(word in input_lower for word in ['goodbye', 'bye', 'see you', 'farewell', 'exit']):
-            return 'goodbye'
-        
-        # Default
-        return 'unclear'
-    
-    def get_fallback_response(self, user_input: str, error_type: str = None) -> str:
-        """Obtenir réponse fallback intelligente"""
-        if error_type == 'api_error':
-            category = 'error'
-        elif error_type == 'timeout':
-            category = 'error'
+        # Détection contextuelle simple
+        if any(word in input_lower for word in ['hello', 'hi', 'hey', 'greetings']):
+            category = 'greeting'
+        elif any(word in input_lower for word in ['bye', 'goodbye', 'farewell', 'see you']):
+            category = 'farewell'
+        elif any(word in input_lower for word in ['time', 'hour', 'clock']):
+            category = 'time'
+        elif any(word in input_lower for word in ['weather', 'temperature', 'rain', 'sunny']):
+            category = 'weather'
         else:
-            category = self.categorize_input(user_input)
+            category = 'general'
         
-        responses = self.fallback_responses.get(category, self.fallback_responses['unclear'])
-        
-        # Sélection pseudo-aléatoire basée sur timestamp
+        # Sélection pseudo-aléatoire basée sur l'input
         import hashlib
-        hash_input = f"{user_input}{int(time.time() / 10)}"  # Change toutes les 10 secondes
+        hash_input = f"{user_input}{int(time.time() / 300)}"  # Change toutes les 5 minutes
         hash_val = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
-        selected_response = responses[hash_val % len(responses)]
+        responses = self.responses[category]
+        selected = responses[hash_val % len(responses)]
         
-        self.logger.info(f"📤 Fallback response (category: {category}): {selected_response}")
-        return selected_response
+        return selected
+
 
 class AssistantCore:
-    """Core assistant optimisé avec gestion intelligente"""
+    """Core Assistant 100% LOCAL - Aucune dépendance externe pour fonctionner"""
     
     def __init__(self):
         self.logger = logging.getLogger("GideonCore")
         
-        # Plus d'OpenAI - utilisation des fallbacks uniquement 
-        self.openai_client = None
-        self.api_available = False
+        # Client Ollama local - PRIORITÉ
+        self.ollama_client = OllamaLocalClient()
         
-        # Les fallbacks sont maintenant le système principal
+        # Fallbacks intelligents - TOUJOURS DISPONIBLES
         self.fallbacks = IntelligentFallbacks()
         
         # Mémoire de conversation
@@ -145,231 +199,175 @@ class AssistantCore:
         # Statistiques
         self.stats = {
             'total_requests': 0,
-            'successful_ai_responses': 0,
+            'ollama_responses': 0,
             'fallback_responses': 0,
             'cached_responses': 0,
             'avg_response_time': 0,
-            'api_errors': 0
+            'errors': 0
         }
         
-        self.logger.info("✅ Gideon Assistant Core initialisé (mode local uniquement)")
+        self.logger.info("✅ Gideon Assistant Core initialisé (100% LOCAL avec Ollama)")
     
     def _test_api_connection(self) -> bool:
-        """Test rapide de connexion API"""
-        if not self.openai_client:
-            return False
-        
-        try:
-            # Test minimal avec timeout court
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": "Test"}],
-                max_tokens=5,
-                timeout=3
-            )
-            self.api_available = True
-            self.logger.info("✅ API OpenAI connectée et fonctionnelle")
-            return True
-            
-        except Exception as e:
-            self.api_available = False
-            self.logger.warning(f"⚠️ API OpenAI non disponible: {e}")
-            return False
+        """Test de connectivité - Ollama uniquement"""
+        return self.ollama_client._test_connection()
     
-    def _get_cache_key(self, user_input: str) -> str:
-        """Générer clé de cache pour input utilisateur"""
-        return user_input.lower().strip()[:100]  # Limitée à 100 chars
-    
-    def _build_context_messages(self, current_input: str) -> List[Dict]:
-        """Construire messages avec contexte de conversation"""
-        messages = [{"role": "system", "content": config.ai.SYSTEM_PROMPT}]
-        
-        # Ajouter contexte récent (max 3 derniers échanges)
-        recent_context = list(self.context_memory)[-3:]
-        for context in recent_context:
-            if context.success:  # Seulement les réponses réussies
-                messages.append({"role": "user", "content": context.user_input})
-                messages.append({"role": "assistant", "content": context.ai_response})
-        
-        # Message actuel
-        messages.append({"role": "user", "content": current_input})
-        
-        return messages
-    
-    def generate_ai_response(self, user_input: str) -> str:
-        """Générer réponse IA avec fallbacks robustes"""
+    def generate_ai_response(self, user_input: str, context: Dict = None) -> Dict:
+        """Génère réponse IA - Ollama prioritaire avec fallbacks intelligents"""
         start_time = time.time()
         self.stats['total_requests'] += 1
         
-        # Validation input
-        if not user_input or not user_input.strip():
-            return self.fallbacks.get_fallback_response("", "empty_input")
-        
-        user_input = user_input.strip()
-        
-        # Check cache d'abord
-        cache_key = self._get_cache_key(user_input)
+        # Cache check
+        cache_key = f"{user_input.lower()}_{len(self.context_memory)}"
         if cache_key in self.response_cache:
             self.stats['cached_responses'] += 1
             cached_response = self.response_cache[cache_key]
-            self.logger.info(f"📋 Réponse en cache: {cached_response[:50]}...")
-            
-            # Ajouter au contexte
-            context = ConversationContext(
-                user_input=user_input,
-                ai_response=cached_response,
-                timestamp=time.time(),
-                response_time=0.01,  # Cache très rapide
-                success=True,
-                fallback_used=False
-            )
-            self.context_memory.append(context)
-            
-            return cached_response
+            return {
+                'success': True,
+                'response': cached_response,
+                'method': 'cache',
+                'response_time': time.time() - start_time,
+                'cached': True
+            }
         
-        # Tentative réponse IA
         ai_response = None
+        method_used = "unknown"
         fallback_used = False
         
-        # Fallback si nécessaire
+        # 1. Essayer Ollama en priorité
+        if self.ollama_client.is_available:
+            try:
+                messages = self._build_context_messages(user_input)
+                
+                ollama_response = self.ollama_client.chat_completion(messages)
+                
+                if "choices" in ollama_response and ollama_response["choices"]:
+                    ai_response = ollama_response["choices"][0]["message"]["content"].strip()
+                    method_used = "ollama"
+                    self.stats['ollama_responses'] += 1
+                    
+                    # Cache si réponse substantielle
+                    if len(ai_response) > 10:
+                        self.response_cache[cache_key] = ai_response
+                        
+                        # Limiter taille cache
+                        if len(self.response_cache) > 50:
+                            oldest_key = next(iter(self.response_cache))
+                            del self.response_cache[oldest_key]
+                
+            except Exception as e:
+                self.logger.error(f"❌ Erreur Ollama: {e}")
+                self.stats['errors'] += 1
+        
+        # 2. Fallback intelligent si Ollama échoue
         if not ai_response:
-            ai_response = self.fallbacks.get_fallback_response(
-                user_input, 
-                "api_error" if not self.api_available else "no_response"
-            )
+            ai_response = self.fallbacks.get_contextual_response(user_input)
+            method_used = "fallback"
             fallback_used = True
             self.stats['fallback_responses'] += 1
         
-        # Calculs de performance
+        # Calcul temps de réponse
         response_time = time.time() - start_time
         
-        # Mise à jour moyenne temps de réponse
-        total_requests = self.stats['total_requests']
+        # Mise à jour statistiques moyennes
+        total = self.stats['total_requests']
         current_avg = self.stats['avg_response_time']
-        self.stats['avg_response_time'] = ((current_avg * (total_requests - 1)) + response_time) / total_requests
+        self.stats['avg_response_time'] = (current_avg * (total - 1) + response_time) / total
         
-        # Ajouter au contexte
-        context = ConversationContext(
+        # Ajout au contexte
+        context_entry = ConversationContext(
             user_input=user_input,
             ai_response=ai_response,
             timestamp=time.time(),
             response_time=response_time,
-            success=not fallback_used,
+            success=True,
             fallback_used=fallback_used
         )
-        self.context_memory.append(context)
+        self.context_memory.append(context_entry)
         
-        # Log détaillé
-        status = "FALLBACK" if fallback_used else "AI"
-        self.logger.info(f"🤖 [{status}] Réponse générée en {response_time:.2f}s: {ai_response[:50]}...")
-        
-        return ai_response
-    
-    def process_voice_command(self, command_text: str) -> Dict:
-        """Traiter commande vocale complète"""
-        if not command_text:
-            return {
-                'success': False,
-                'error': 'Empty command',
-                'response': 'I didn\'t hear anything. Could you try again?'
-            }
-        
-        try:
-            start_time = time.time()
-            
-            # Générer réponse
-            response = self.generate_ai_response(command_text)
-            
-            processing_time = time.time() - start_time
-            
-            self.logger.info(f"🎯 Commande traitée: '{command_text}' → '{response}' ({processing_time:.2f}s)")
-            
-            return {
-                'success': True,
-                'command': command_text,
-                'response': response,
-                'processing_time': processing_time,
-                'fallback_used': not self.api_available,
-                'timestamp': time.time()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"❌ Erreur traitement commande: {e}")
-            
-            fallback_response = self.fallbacks.get_fallback_response(command_text, "processing_error")
-            
-            return {
-                'success': False,
-                'error': str(e),
-                'command': command_text,
-                'response': fallback_response,
-                'fallback_used': True,
-                'timestamp': time.time()
-            }
-    
-    def get_conversation_summary(self) -> Dict:
-        """Obtenir résumé de la conversation"""
-        total_exchanges = len(self.context_memory)
-        successful_exchanges = sum(1 for ctx in self.context_memory if ctx.success)
-        
-        if total_exchanges > 0:
-            avg_response_time = sum(ctx.response_time for ctx in self.context_memory) / total_exchanges
-            success_rate = (successful_exchanges / total_exchanges) * 100
-        else:
-            avg_response_time = 0
-            success_rate = 0
+        self.logger.info(f"🤖 Réponse générée via {method_used} en {response_time:.2f}s")
         
         return {
-            'total_exchanges': total_exchanges,
-            'successful_exchanges': successful_exchanges,
-            'success_rate': f"{success_rate:.1f}%",
-            'avg_response_time': f"{avg_response_time:.2f}s",
-            'api_available': self.api_available,
+            'success': True,
+            'response': ai_response,
+            'method': method_used,
+            'response_time': response_time,
+            'fallback_used': fallback_used,
+            'cached': False
+        }
+    
+    def _build_context_messages(self, user_input: str) -> List[Dict]:
+        """Construit messages avec contexte pour Ollama"""
+        messages = [
+            {
+                "role": "system",
+                "content": "You are Gideon, a helpful AI assistant running locally. Be concise, friendly, and helpful. Respond in the same language as the user."
+            }
+        ]
+        
+        # Ajout contexte récent (3 derniers échanges)
+        recent_context = list(self.context_memory)[-3:]
+        for ctx in recent_context:
+            messages.append({"role": "user", "content": ctx.user_input})
+            messages.append({"role": "assistant", "content": ctx.ai_response})
+        
+        # Message actuel
+        messages.append({"role": "user", "content": user_input})
+        
+        return messages
+    
+    def process_voice_command(self, command: str) -> Dict:
+        """Traite commande vocale"""
+        self.logger.info(f"🎤 Commande vocale reçue: {command}")
+        
+        # Génération réponse
+        result = self.generate_ai_response(command)
+        
+        if result['success']:
+            return {
+                'success': True,
+                'response': result['response'],
+                'method': result['method'],
+                'response_time': result['response_time'],
+                'fallback_used': result.get('fallback_used', False)
+            }
+        else:
+            error_response = "I couldn't process that command right now. Please try again."
+            return {
+                'success': False,
+                'response': error_response,
+                'error': result.get('error', 'Unknown error'),
+                'fallback_used': True
+            }
+    
+    def get_system_status(self) -> Dict:
+        """Status système"""
+        return {
+            'ollama_available': self.ollama_client.is_available,
+            'total_requests': self.stats['total_requests'],
+            'ollama_success_rate': (self.stats['ollama_responses'] / max(1, self.stats['total_requests'])) * 100,
+            'fallback_usage': (self.stats['fallback_responses'] / max(1, self.stats['total_requests'])) * 100,
+            'avg_response_time': self.stats['avg_response_time'],
+            'conversation_length': len(self.context_memory),
             'cache_size': len(self.response_cache)
         }
     
-    def get_stats(self) -> Dict:
-        """Obtenir statistiques complètes"""
-        return {
-            **self.stats,
-            'api_available': self.api_available,
-            'cache_size': len(self.response_cache),
-            'context_memory_size': len(self.context_memory),
-            'conversation_summary': self.get_conversation_summary()
-        }
-    
-    def reset_api_connection(self) -> bool:
-        """Réinitialiser connexion API"""
-        self.logger.info("🔄 Réinitialisation connexion API...")
-        
-        if self._test_api_connection():
-            self.logger.info("✅ Connexion API rétablie")
-            return True
-        else:
-            self.logger.warning("❌ Connexion API toujours indisponible")
-            return False
+    def reset_conversation(self):
+        """Reset conversation context"""
+        self.context_memory.clear()
+        self.response_cache.clear()
+        self.logger.info("🔄 Conversation context reset")
     
     def cleanup_memory_resources(self):
-        """Nettoyer ressources mémoire"""
-        # Limiter cache
-        if len(self.response_cache) > 20:
-            # Garder seulement les 20 plus récentes
-            items = list(self.response_cache.items())
-            self.response_cache = dict(items[-20:])
+        """Nettoyage mémoire"""
+        self.context_memory.clear()
+        self.response_cache.clear()
         
-        # Limiter contexte
-        if len(self.context_memory) > 5:
-            # Garder seulement les 5 plus récents
-            recent_contexts = list(self.context_memory)[-5:]
-            self.context_memory.clear()
-            self.context_memory.extend(recent_contexts)
-        
-        self.logger.debug("🧹 Nettoyage mémoire assistant terminé")
-    
     def cleanup(self):
         """Nettoyage complet"""
         self.cleanup_memory_resources()
         self.logger.info("🧹 Cleanup assistant core terminé")
+
 
 # Instance globale
 assistant_core = AssistantCore() 

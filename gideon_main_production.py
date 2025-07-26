@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
 Gideon AI Assistant - Main Production Application
-Version finale avec résolution complète des 10 problèmes critiques
+100% LOCAL avec Ollama - AUCUNE dépendance externe
 
 Nouvelles fonctionnalités:
-- ✅ Détection automatique OS et adaptations (Problème #6)
-- ✅ Fallbacks intelligents pour tous composants (Problème #9)
-- ✅ Monitoring mémoire en temps réel (Problème #7)
-- ✅ Tests de permissions automatiques (Problème #5)
+- ✅ Core 100% local avec Ollama
+- ✅ Aucune dépendance OpenAI/API externe
+- ✅ Fallbacks intelligents intégrés
 - ✅ Interface adaptative selon capacités système
 """
 
@@ -37,7 +36,8 @@ if SYSTEM_OS == "Linux" and "WAYLAND_DISPLAY" in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "xcb"
     print("🐧 Wayland détecté - Basculement vers X11 pour system tray")
 
-from core.assistant_core_production import GideonCoreProduction
+# CORRECTION CRITIQUE: Import correct
+from core.assistant_core_production import AssistantCore
 from core.event_system import EventSystem
 from core.logger import GideonLogger
 from config import config
@@ -304,7 +304,7 @@ class GideonApplication:
         
         # Initialiser core assistant
         try:
-            self.gideon_core = GideonCoreProduction()
+            self.gideon_core = AssistantCore()
             self.logger.info("✅ Core assistant initialisé")
         except Exception as e:
             self.logger.error(f"❌ Erreur initialisation core: {e}")
