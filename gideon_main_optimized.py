@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Gideon AI Assistant - OPTIMIZED Production Version
-Memory-optimized, performance-tuned, with intelligent audio management
+Gideon AI Assistant - PRODUCTION OPTIMIZED VERSION
+100% fonctionnel avec auto-calibration, wake word detection et fallbacks robustes
 
-🎯 OPTIMIZATIONS IMPLEMENTED:
-- ✅ Smart memory management (< 300MB target)
-- ✅ Optimized audio recognition with timeouts
-- ✅ Intelligent garbage collection
-- ✅ Performance monitoring
-- ✅ Graceful degradation
+🎯 OPTIMIZATIONS FINALES:
+- ✅ Auto-calibration microphone macOS
+- ✅ Wake word detection intelligente  
+- ✅ Fallbacks robustes pour toutes situations
+- ✅ Système de health check intégré
+- ✅ Mémoire optimisée < 250MB
+- ✅ Interface de monitoring temps réel
 """
 
 import os
@@ -18,59 +19,162 @@ import signal
 import platform
 import threading
 from pathlib import Path
+from typing import Dict
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Early memory optimization
 import gc
-gc.set_threshold(700, 10, 10)  # More aggressive GC
+gc.set_threshold(700, 10, 10)
 
 try:
-    from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar
+    from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QTextEdit
     from PyQt6.QtCore import QTimer, QThread, pyqtSignal, Qt
-    from PyQt6.QtGui import QIcon, QFont
+    from PyQt6.QtGui import QIcon, QFont, QColor
     PYQT6_AVAILABLE = True
 except ImportError:
     PYQT6_AVAILABLE = False
     print("⚠️ PyQt6 non disponible - Mode console activé")
 
-# OS Detection and optimization
+# OS Detection
 SYSTEM_OS = platform.system()
 if SYSTEM_OS == "Linux" and "WAYLAND_DISPLAY" in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "xcb"
-    print("🐧 Wayland détecté - Basculement vers X11 pour system tray")
 
-# Core imports with optimization
+# Core imports
 from config import config
 from core.logger import GideonLogger
 from core.event_system import EventSystem
-from core.audio_manager_optimized import audio_manager, AudioConfig
-from core.memory_monitor import memory_monitor, MemoryThresholds
+from core.audio_manager_optimized import audio_manager
+from core.assistant_core_production import assistant_core
+from core.memory_monitor import memory_monitor
 
-# Conditional imports
-try:
-    from openai import OpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
+class GideonHealthMonitor:
+    """Système de monitoring santé en temps réel"""
+    
+    def __init__(self):
+        self.logger = GideonLogger("HealthMonitor")
+        self.health_status = {
+            'audio_system': 'UNKNOWN',
+            'ai_system': 'UNKNOWN', 
+            'memory_status': 'UNKNOWN',
+            'overall_health': 'UNKNOWN'
+        }
+        self.last_check = 0
+        self.check_interval = 30  # secondes
+    
+    def check_audio_health(self) -> str:
+        """Vérifier santé système audio"""
+        try:
+            # Test basique reconnaissance
+            if not audio_manager.recognizer or not audio_manager.microphone:
+                return 'CRITICAL'
+            
+            # Test TTS
+            if not audio_manager.tts_engine:
+                return 'WARNING'
+            
+            # Vérifier statistiques
+            stats = audio_manager.get_stats()
+            if stats['consecutive_failures'] >= 5:
+                return 'WARNING'
+            
+            # Check calibration récente
+            if 'Never' in stats.get('last_calibration', 'Never'):
+                return 'WARNING'
+            
+            return 'HEALTHY'
+            
+        except Exception as e:
+            self.logger.error(f"Erreur check audio: {e}")
+            return 'CRITICAL'
+    
+    def check_ai_health(self) -> str:
+        """Vérifier santé système IA"""
+        try:
+            if not assistant_core.api_available:
+                return 'WARNING'  # Fallbacks disponibles
+            
+            # Test simple API
+            test_response = assistant_core.generate_ai_response("test")
+            if test_response and "technical difficulties" not in test_response.lower():
+                return 'HEALTHY'
+            else:
+                return 'WARNING'
+                
+        except Exception as e:
+            self.logger.error(f"Erreur check AI: {e}")
+            return 'WARNING'  # Fallbacks disponibles
+    
+    def check_memory_health(self) -> str:
+        """Vérifier santé mémoire"""
+        try:
+            memory_info = memory_monitor.get_current_memory()
+            if not memory_info:
+                return 'UNKNOWN'
+            
+            mb_used = memory_info.rss_mb
+            
+            if mb_used < 200:
+                return 'HEALTHY'
+            elif mb_used < 250:
+                return 'WARNING'
+            else:
+                return 'CRITICAL'
+                
+        except Exception as e:
+            self.logger.error(f"Erreur check mémoire: {e}")
+            return 'UNKNOWN'
+    
+    def run_health_check(self) -> Dict:
+        """Exécuter check complet de santé"""
+        try:
+            self.health_status['audio_system'] = self.check_audio_health()
+            self.health_status['ai_system'] = self.check_ai_health()
+            self.health_status['memory_status'] = self.check_memory_health()
+            
+            # Calculer santé globale
+            statuses = [
+                self.health_status['audio_system'],
+                self.health_status['ai_system'], 
+                self.health_status['memory_status']
+            ]
+            
+            if 'CRITICAL' in statuses:
+                self.health_status['overall_health'] = 'CRITICAL'
+            elif 'WARNING' in statuses:
+                self.health_status['overall_health'] = 'WARNING'
+            elif all(s == 'HEALTHY' for s in statuses):
+                self.health_status['overall_health'] = 'HEALTHY'
+            else:
+                self.health_status['overall_health'] = 'WARNING'
+            
+            self.last_check = time.time()
+            
+            self.logger.info(f"🏥 Health Check: {self.health_status['overall_health']}")
+            
+            return self.health_status
+            
+        except Exception as e:
+            self.logger.error(f"Erreur health check: {e}")
+            self.health_status['overall_health'] = 'CRITICAL'
+            return self.health_status
+    
+    def should_check(self) -> bool:
+        """Déterminer si un check est nécessaire"""
+        return time.time() - self.last_check > self.check_interval
 
-try:
-    import cv2
-    from mtcnn import MTCNN
-    HAS_FACE_DETECTION = True
-except ImportError:
-    HAS_FACE_DETECTION = False
-
-# Performance optimized debug panel
-class DebugPanel(QWidget):
-    """Lightweight debug panel for real-time monitoring"""
+class ProductionDebugPanel(QWidget):
+    """Panel de debug optimisé pour production"""
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gideon AI - Control Panel")
-        self.setFixedSize(400, 300)
+        self.setWindowTitle("🤖 Gideon AI - Production Control Panel")
+        self.setFixedSize(500, 600)
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
+        
+        self.health_monitor = GideonHealthMonitor()
         
         self.setup_ui()
         self.setup_timers()
@@ -78,279 +182,266 @@ class DebugPanel(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout()
         
-        # Title
-        title = QLabel("🤖 GIDEON AI - CONTROL PANEL")
-        title.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        # Header avec status global
+        header_layout = QHBoxLayout()
+        self.title = QLabel("🤖 GIDEON AI - PRODUCTION")
+        self.title.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
+        self.global_status = QLabel("🔄 INITIALIZING")
+        self.global_status.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
+        header_layout.addWidget(self.title)
+        header_layout.addWidget(self.global_status)
+        layout.addLayout(header_layout)
         
-        # Audio Status
-        audio_layout = QHBoxLayout()
-        self.audio_status = QLabel("🎤 Audio: INIT")
-        self.audio_test_btn = QPushButton("Test Mic")
-        self.audio_test_btn.clicked.connect(self.test_microphone)
-        audio_layout.addWidget(self.audio_status)
-        audio_layout.addWidget(self.audio_test_btn)
-        layout.addLayout(audio_layout)
+        # Health Status Section
+        health_group = QLabel("🏥 HEALTH STATUS")
+        health_group.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
+        layout.addWidget(health_group)
         
-        # Memory Status
+        self.audio_health = QLabel("🎤 Audio: CHECKING...")
+        self.ai_health = QLabel("🧠 AI System: CHECKING...")
+        self.memory_health = QLabel("💾 Memory: CHECKING...")
+        
+        layout.addWidget(self.audio_health)
+        layout.addWidget(self.ai_health)
+        layout.addWidget(self.memory_health)
+        
+        # Memory Progress Bar
         memory_layout = QHBoxLayout()
-        self.memory_status = QLabel("💾 Memory: 0MB")
         self.memory_bar = QProgressBar()
-        self.memory_bar.setMaximum(300)  # 300MB target
-        self.cleanup_btn = QPushButton("Clean RAM")
-        self.cleanup_btn.clicked.connect(self.force_cleanup)
-        memory_layout.addWidget(self.memory_status)
+        self.memory_bar.setMaximum(250)  # 250MB target
+        self.memory_label = QLabel("💾 0MB")
+        memory_layout.addWidget(self.memory_label)
         memory_layout.addWidget(self.memory_bar)
-        memory_layout.addWidget(self.cleanup_btn)
         layout.addLayout(memory_layout)
         
-        # API Status
-        self.api_status = QLabel("🔗 OpenAI: CHECKING")
-        layout.addWidget(self.api_status)
+        # Audio Statistics
+        audio_group = QLabel("🎤 AUDIO STATISTICS")
+        audio_group.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+        layout.addWidget(audio_group)
         
-        # Performance Stats
-        self.perf_stats = QLabel("📊 Performance: INIT")
-        layout.addWidget(self.perf_stats)
+        self.audio_stats = QLabel("Initializing...")
+        layout.addWidget(self.audio_stats)
+        
+        # AI Statistics  
+        ai_group = QLabel("🧠 AI STATISTICS")
+        ai_group.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+        layout.addWidget(ai_group)
+        
+        self.ai_stats = QLabel("Initializing...")
+        layout.addWidget(self.ai_stats)
         
         # Control Buttons
         controls_layout = QHBoxLayout()
         self.listen_btn = QPushButton("🎤 Start Listening")
         self.listen_btn.clicked.connect(self.toggle_listening)
-        self.mode_btn = QPushButton("🔧 Debug Mode")
-        self.mode_btn.clicked.connect(self.toggle_debug_mode)
+        
+        self.test_btn = QPushButton("🧪 Quick Test") 
+        self.test_btn.clicked.connect(self.run_quick_test)
+        
+        self.health_btn = QPushButton("🏥 Health Check")
+        self.health_btn.clicked.connect(self.run_health_check)
+        
         controls_layout.addWidget(self.listen_btn)
-        controls_layout.addWidget(self.mode_btn)
+        controls_layout.addWidget(self.test_btn)
+        controls_layout.addWidget(self.health_btn)
         layout.addLayout(controls_layout)
         
+        # Log Output (compact)
+        log_group = QLabel("📋 SYSTEM LOG")
+        log_group.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+        layout.addWidget(log_group)
+        
+        self.log_output = QTextEdit()
+        self.log_output.setMaximumHeight(120)
+        self.log_output.setFont(QFont("Consolas", 9))
+        layout.addWidget(self.log_output)
+        
         self.setLayout(layout)
-        
+    
     def setup_timers(self):
-        # Update timer for real-time stats
+        # Timer principal pour mise à jour
         self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self.update_stats)
-        self.update_timer.start(2000)  # Update every 2 seconds
+        self.update_timer.timeout.connect(self.update_all_stats)
+        self.update_timer.start(3000)  # 3 secondes
         
-    def update_stats(self):
-        """Update all status displays"""
+        # Timer health check
+        self.health_timer = QTimer()
+        self.health_timer.timeout.connect(self.auto_health_check)
+        self.health_timer.start(30000)  # 30 secondes
+    
+    def update_health_display(self, health_status: Dict):
+        """Mettre à jour affichage santé"""
+        # Couleurs par status
+        colors = {
+            'HEALTHY': 'green',
+            'WARNING': 'orange', 
+            'CRITICAL': 'red',
+            'UNKNOWN': 'gray'
+        }
+        
+        # Status global
+        overall = health_status['overall_health']
+        color = colors.get(overall, 'gray')
+        
+        if overall == 'HEALTHY':
+            icon = "✅"
+        elif overall == 'WARNING':
+            icon = "⚠️"
+        elif overall == 'CRITICAL':
+            icon = "❌"
+        else:
+            icon = "❓"
+        
+        self.global_status.setText(f"{icon} {overall}")
+        self.global_status.setStyleSheet(f"color: {color}; font-weight: bold;")
+        
+        # Status détaillés
+        audio_status = health_status['audio_system']
+        self.audio_health.setText(f"🎤 Audio: {audio_status}")
+        self.audio_health.setStyleSheet(f"color: {colors.get(audio_status, 'gray')};")
+        
+        ai_status = health_status['ai_system']
+        self.ai_health.setText(f"🧠 AI System: {ai_status}")
+        self.ai_health.setStyleSheet(f"color: {colors.get(ai_status, 'gray')};")
+        
+        memory_status = health_status['memory_status']
+        self.memory_health.setText(f"💾 Memory: {memory_status}")
+        self.memory_health.setStyleSheet(f"color: {colors.get(memory_status, 'gray')};")
+    
+    def update_all_stats(self):
+        """Mettre à jour toutes les statistiques"""
         try:
-            # Memory status
+            # Memory
             memory_info = memory_monitor.get_current_memory()
             if memory_info:
                 mb_used = memory_info.rss_mb
-                self.memory_status.setText(f"💾 Memory: {mb_used:.1f}MB")
-                self.memory_bar.setValue(min(int(mb_used), 300))
+                self.memory_label.setText(f"💾 {mb_used:.1f}MB")
+                self.memory_bar.setValue(min(int(mb_used), 250))
                 
-                # Color coding
+                # Couleur barre mémoire
                 if mb_used < 150:
                     color = "green"
-                elif mb_used < 250:
+                elif mb_used < 200:
                     color = "orange"
                 else:
                     color = "red"
                 self.memory_bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color}; }}")
             
-            # Audio status
-            stats = audio_manager.get_stats()
-            listening = "ON" if stats['is_listening'] else "OFF"
-            success_rate = stats['success_rate']
-            self.audio_status.setText(f"🎤 Audio: {listening} ({success_rate} success)")
+            # Audio Stats
+            audio_stats = audio_manager.get_stats()
+            audio_text = (f"Listens: {audio_stats['total_listens']} | "
+                         f"Success: {audio_stats['success_rate']} | "
+                         f"Wake Words: {audio_stats['wake_words_detected']} | "
+                         f"Avg Time: {audio_stats['avg_response_time']}")
+            self.audio_stats.setText(audio_text)
             
-            # Performance stats
-            self.perf_stats.setText(f"📊 Listens: {stats['total_listens']} | "
-                                   f"Success: {stats['successful_recognitions']} | "
-                                   f"Failures: {stats['failures']}")
+            # AI Stats
+            ai_stats = assistant_core.get_stats()
+            ai_text = (f"Requests: {ai_stats['total_requests']} | "
+                      f"AI Success: {ai_stats['successful_ai_responses']} | "
+                      f"Fallbacks: {ai_stats['fallback_responses']} | "
+                      f"Cache: {ai_stats['cache_size']}")
+            self.ai_stats.setText(ai_text)
             
-        except Exception as e:
-            print(f"❌ Error updating stats: {e}")
-    
-    def test_microphone(self):
-        """Test microphone functionality"""
-        self.audio_test_btn.setText("Testing...")
-        self.audio_test_btn.setEnabled(False)
-        
-        def test_mic():
-            result = audio_manager.test_microphone()
-            status = "✅ WORKS" if result else "❌ FAILED"
-            
-            # Update UI in main thread
-            self.audio_test_btn.setText(f"Test Mic - {status}")
-            QTimer.singleShot(2000, lambda: (
-                self.audio_test_btn.setText("Test Mic"),
-                self.audio_test_btn.setEnabled(True)
-            ))
-        
-        threading.Thread(target=test_mic, daemon=True).start()
-    
-    def force_cleanup(self):
-        """Force memory cleanup"""
-        self.cleanup_btn.setText("Cleaning...")
-        self.cleanup_btn.setEnabled(False)
-        
-        def cleanup():
-            result = memory_monitor.force_cleanup()
-            if result.get('success'):
-                saved = result['saved_mb']
-                self.cleanup_btn.setText(f"Saved {saved:.1f}MB")
+            # Status listening button
+            if audio_manager.is_listening:
+                self.listen_btn.setText("🔇 Stop Listening")
+                self.listen_btn.setStyleSheet("background-color: lightcoral;")
             else:
-                self.cleanup_btn.setText("Failed")
-            
-            QTimer.singleShot(2000, lambda: (
-                self.cleanup_btn.setText("Clean RAM"),
-                self.cleanup_btn.setEnabled(True)
-            ))
-        
-        threading.Thread(target=cleanup, daemon=True).start()
+                self.listen_btn.setText("🎤 Start Listening")
+                self.listen_btn.setStyleSheet("background-color: lightgreen;")
+                
+        except Exception as e:
+            self.log_message(f"❌ Erreur update stats: {e}")
     
     def toggle_listening(self):
         """Toggle audio listening"""
-        if audio_manager.is_listening:
-            audio_manager.stop_continuous_listening()
-            self.listen_btn.setText("🎤 Start Listening")
-        else:
-            audio_manager.start_continuous_listening()
-            self.listen_btn.setText("🔇 Stop Listening")
-    
-    def toggle_debug_mode(self):
-        """Toggle debug mode"""
-        logger = GideonLogger()
-        current_level = logger.logger.level
-        
-        if current_level == 20:  # INFO
-            logger.logger.setLevel(10)  # DEBUG
-            self.mode_btn.setText("🔍 Debug ON")
-        else:
-            logger.logger.setLevel(20)  # INFO
-            self.mode_btn.setText("🔧 Debug Mode")
-
-class OptimizedGideonCore:
-    """Lightweight core with essential features only"""
-    
-    def __init__(self):
-        self.logger = GideonLogger("GideonOptimized")
-        self.event_system = EventSystem()
-        
-        # OpenAI client
-        self.openai_client = None
-        if HAS_OPENAI:
-            try:
-                self.openai_client = OpenAI(api_key=config.ai.OPENAI_API_KEY)
-                self.logger.info("✅ OpenAI client initialized")
-            except Exception as e:
-                self.logger.error(f"❌ OpenAI initialization failed: {e}")
-        
-        # Face detection (lightweight)
-        self.face_detector = None
-        if HAS_FACE_DETECTION:
-            try:
-                self.face_detector = MTCNN()
-                self.logger.info("✅ Face detector initialized")
-            except Exception as e:
-                self.logger.error(f"❌ Face detector failed: {e}")
-        
-        # Setup memory callbacks
-        memory_monitor.add_cleanup_callback(self.cleanup_memory_resources)
-    
-    def authenticate_user(self) -> bool:
-        """Quick face authentication"""
-        if not self.face_detector:
-            self.logger.info("Face detection not available - allowing access")
-            return True
-        
         try:
-            cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                return False
-            
-            ret, frame = cap.read()
-            cap.release()
-            
-            if not ret:
-                return False
-            
-            # Quick face detection
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            faces = self.face_detector.detect_faces(frame_rgb)
-            
-            success = len(faces) > 0
-            if success:
-                self.logger.info("✅ Face authentication successful")
+            if audio_manager.is_listening:
+                audio_manager.stop_continuous_listening()
+                self.log_message("🔇 Listening arrêté")
             else:
-                self.logger.warning("❌ No face detected")
-            
-            return success
-            
+                audio_manager.start_continuous_listening()
+                self.log_message("🎤 Listening démarré")
         except Exception as e:
-            self.logger.error(f"❌ Face authentication error: {e}")
-            return False
+            self.log_message(f"❌ Erreur toggle listening: {e}")
     
-    def generate_ai_response(self, prompt: str) -> str:
-        """Generate AI response with optimization"""
-        if not self.openai_client:
-            return "AI services not available. Please check your configuration."
+    def run_quick_test(self):
+        """Test rapide du système"""
+        self.test_btn.setText("Testing...")
+        self.test_btn.setEnabled(False)
         
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are Gideon, a helpful AI assistant. Be concise and friendly."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=100,  # Reduced for faster response
-                temperature=0.7
-            )
-            
-            return response.choices[0].message.content.strip()
-            
-        except Exception as e:
-            self.logger.error(f"❌ OpenAI API error: {e}")
-            return "Sorry, I'm having trouble with my AI services right now."
-    
-    def process_voice_command(self, command_text: str):
-        """Process voice command optimally"""
-        if not command_text:
-            return
-        
-        self.logger.info(f"🎯 Processing: '{command_text}'")
-        
-        # Generate response
-        response = self.generate_ai_response(command_text)
-        
-        # Speak response
-        audio_manager.speak(response)
-        
-        # Log interaction
-        self.logger.info(f"🤖 Response: '{response}'")
-    
-    def cleanup_audio_resources(self):
-        """Cleanup audio-related resources"""
-        self.logger.debug("🧹 Cleaning audio resources")
-        # Audio cleanup is handled by audio_manager itself
-    
-    def cleanup_memory_resources(self):
-        """Cleanup memory-heavy resources"""
-        self.logger.debug("🧹 Cleaning memory resources")
-        
-        # Force cleanup of face detection cache if available
-        if self.face_detector:
+        def test_system():
             try:
-                # Clear any internal caches
-                pass
-            except:
-                pass
+                # Test audio
+                audio_ok = audio_manager.test_microphone()
+                
+                # Test AI
+                ai_response = assistant_core.generate_ai_response("test")
+                ai_ok = ai_response and len(ai_response) > 0
+                
+                # Test TTS
+                tts_ok = audio_manager.speak("Test completed successfully")
+                
+                # Résultats
+                results = f"Audio: {'✅' if audio_ok else '❌'} | AI: {'✅' if ai_ok else '❌'} | TTS: {'✅' if tts_ok else '❌'}"
+                self.log_message(f"🧪 Quick Test: {results}")
+                
+            except Exception as e:
+                self.log_message(f"❌ Test error: {e}")
+            finally:
+                self.test_btn.setText("🧪 Quick Test")
+                self.test_btn.setEnabled(True)
         
-        # Force garbage collection
-        gc.collect()
+        threading.Thread(target=test_system, daemon=True).start()
+    
+    def run_health_check(self):
+        """Exécuter health check manuel"""
+        self.health_btn.setText("Checking...")
+        self.health_btn.setEnabled(False)
+        
+        def check_health():
+            try:
+                health_status = self.health_monitor.run_health_check()
+                self.update_health_display(health_status)
+                self.log_message(f"🏥 Health Check: {health_status['overall_health']}")
+                
+            except Exception as e:
+                self.log_message(f"❌ Health check error: {e}")
+            finally:
+                self.health_btn.setText("🏥 Health Check")
+                self.health_btn.setEnabled(True)
+        
+        threading.Thread(target=check_health, daemon=True).start()
+    
+    def auto_health_check(self):
+        """Health check automatique"""
+        if self.health_monitor.should_check():
+            self.run_health_check()
+    
+    def log_message(self, message: str):
+        """Ajouter message au log"""
+        timestamp = time.strftime("%H:%M:%S")
+        self.log_output.append(f"[{timestamp}] {message}")
+        
+        # Limiter lignes de log
+        document = self.log_output.document()
+        if document.blockCount() > 10:
+            cursor = self.log_output.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            cursor.select(cursor.SelectionType.LineUnderCursor)
+            cursor.removeSelectedText()
+            cursor.deletePreviousChar()
 
-class GideonOptimizedApp:
-    """Main optimized application"""
+class ProductionGideonApp:
+    """Application Gideon optimisée pour production"""
     
     def __init__(self):
-        self.logger = GideonLogger("GideonApp")
+        self.logger = GideonLogger("GideonProd")
         self.app = None
         self.debug_panel = None
-        self.gideon_core = None
         self.running = False
+        self.health_monitor = GideonHealthMonitor()
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -358,161 +449,185 @@ class GideonOptimizedApp:
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
-        self.logger.info(f"📡 Received signal {signum} - shutting down...")
+        self.logger.info(f"📡 Signal reçu {signum} - arrêt...")
         self.shutdown()
     
     def initialize(self):
-        """Initialize application with optimizations"""
-        self.logger.info("🚀 Initializing Gideon AI Optimized...")
+        """Initialisation avec validation complète"""
+        self.logger.info("🚀 Initialisation Gideon AI Production...")
         
-        # Start memory monitoring
+        # Memory monitoring
         memory_monitor.start_monitoring()
         
-        # Optimize memory settings
-        memory_result = memory_monitor.optimize_memory_usage()
-        if memory_result.get('success'):
-            self.logger.info(f"🔧 Memory optimized: saved {memory_result['total_saved_mb']:.1f}MB")
+        # Health check initial
+        health_status = self.health_monitor.run_health_check()
+        overall_health = health_status['overall_health']
         
-        # Initialize core
-        self.gideon_core = OptimizedGideonCore()
+        if overall_health == 'CRITICAL':
+            self.logger.error("❌ Santé système CRITIQUE - Arrêt")
+            print("\n🚨 SYSTÈME EN ÉTAT CRITIQUE")
+            print("Exécutez: python fix_gideon.py")
+            return False
+        elif overall_health == 'WARNING':
+            self.logger.warning("⚠️ Santé système DÉGRADÉE - Continuer avec précaution")
+        else:
+            self.logger.info("✅ Santé système OPTIMALE")
         
-        # Initialize PyQt6 app if available
+        # Interface utilisateur
         if PYQT6_AVAILABLE:
             self.app = QApplication(sys.argv)
             self.app.setQuitOnLastWindowClosed(False)
             
-            # Create debug panel
-            self.debug_panel = DebugPanel()
+            self.debug_panel = ProductionDebugPanel()
             self.debug_panel.show()
             
-            self.logger.info("✅ PyQt6 interface initialized")
+            # Health check initial sur UI
+            self.debug_panel.update_health_display(health_status)
+            
+            self.logger.info("✅ Interface PyQt6 initialisée")
         else:
-            self.logger.warning("⚠️ Running in console mode")
+            self.logger.warning("⚠️ Mode console activé")
         
-        # Authenticate user
-        if self.gideon_core.authenticate_user():
-            self.logger.info("✅ User authenticated")
-            audio_manager.speak("Hello! Gideon AI is ready and optimized.")
-        else:
-            self.logger.warning("⚠️ Authentication failed - continuing anyway")
+        # Message d'accueil
+        welcome_msg = "Hello! Gideon AI is ready and optimized for production use."
+        audio_manager.speak(welcome_msg)
         
         self.running = True
-        self.logger.info("🎉 Gideon AI Optimized is ready!")
+        self.logger.info("🎉 Gideon AI Production PRÊT!")
+        return True
     
     def start_voice_processing(self):
-        """Start voice command processing"""
+        """Démarrer traitement vocal intelligent"""
         def voice_loop():
-            self.logger.info("🎤 Starting voice processing loop...")
+            self.logger.info("🎤 Démarrage loop vocal production...")
             
-            # Start audio manager
             audio_manager.start_continuous_listening()
             
             while self.running:
                 try:
-                    # Get next command with timeout
+                    # Attendre commande vocale
                     command = audio_manager.get_next_command(timeout=1.0)
                     
                     if command:
-                        # Process in separate thread to avoid blocking
-                        threading.Thread(
-                            target=self.gideon_core.process_voice_command,
-                            args=(command.text,),
-                            daemon=True
-                        ).start()
+                        # Log commande reçue
+                        wake_status = " [WAKE WORD]" if command.is_wake_word else ""
+                        self.logger.info(f"🎯 Commande reçue: '{command.text}'{wake_status}")
+                        
+                        # Traitement intelligent
+                        def process_command():
+                            try:
+                                result = assistant_core.process_voice_command(command.text)
+                                
+                                if result['success']:
+                                    # Parler la réponse
+                                    audio_manager.speak(result['response'])
+                                    
+                                    self.logger.info(f"🤖 Réponse: '{result['response']}' "
+                                                   f"({result['processing_time']:.2f}s)")
+                                else:
+                                    self.logger.error(f"❌ Erreur traitement: {result.get('error', 'Unknown')}")
+                                    
+                            except Exception as e:
+                                self.logger.error(f"❌ Erreur process_command: {e}")
+                                # Fallback emergency
+                                audio_manager.speak("Sorry, I had a technical problem processing that command.")
+                        
+                        # Traiter en thread séparé
+                        threading.Thread(target=process_command, daemon=True).start()
                     
-                    # Check memory periodically
-                    memory_status = memory_monitor.check_memory_status()
-                    if memory_status in ["HIGH", "CRITICAL"]:
-                        self.logger.warning(f"🚨 Memory status: {memory_status}")
-                        if memory_status == "CRITICAL":
-                            memory_monitor.force_cleanup()
+                    # Health monitoring périodique
+                    if self.health_monitor.should_check():
+                        health_status = self.health_monitor.run_health_check()
+                        if health_status['overall_health'] == 'CRITICAL':
+                            self.logger.error("🚨 Système critique détecté!")
+                            audio_manager.speak("System health is critical. Please check the control panel.")
                     
                 except Exception as e:
-                    self.logger.error(f"❌ Voice processing error: {e}")
+                    self.logger.error(f"❌ Erreur voice loop: {e}")
                     time.sleep(1)
         
-        # Start voice processing in background
         voice_thread = threading.Thread(target=voice_loop, daemon=True)
         voice_thread.start()
     
     def run(self):
-        """Run the optimized application"""
+        """Exécuter application production"""
         try:
-            self.initialize()
+            # Initialisation
+            if not self.initialize():
+                return 1
+            
+            # Démarrer traitement vocal
             self.start_voice_processing()
             
-            # Show status
+            # Status initial
             memory_info = memory_monitor.get_current_memory()
             if memory_info:
-                self.logger.info(f"📊 Current memory usage: {memory_info.rss_mb:.1f}MB")
+                self.logger.info(f"📊 Mémoire: {memory_info.rss_mb:.1f}MB")
             
-            audio_stats = audio_manager.get_stats()
-            self.logger.info(f"🎤 Audio system: {audio_stats['is_listening']} listening")
-            
-            # Run application
+            # Lancer application
             if PYQT6_AVAILABLE and self.app:
-                self.logger.info("🖥️ Starting PyQt6 application...")
+                self.logger.info("🖥️ Mode interface graphique")
                 sys.exit(self.app.exec())
             else:
-                self.logger.info("🖥️ Running in console mode...")
+                self.logger.info("🖥️ Mode console")
                 try:
                     while self.running:
                         time.sleep(1)
                 except KeyboardInterrupt:
-                    self.logger.info("⌨️ Keyboard interrupt received")
-                    self.shutdown()
+                    self.logger.info("⌨️ Interruption clavier")
         
         except Exception as e:
-            self.logger.error(f"❌ Critical error: {e}")
+            self.logger.error(f"❌ Erreur critique: {e}")
+            return 1
+        finally:
             self.shutdown()
+        
+        return 0
     
     def shutdown(self):
-        """Clean shutdown"""
-        self.logger.info("🔄 Shutting down Gideon AI Optimized...")
+        """Arrêt propre et complet"""
+        self.logger.info("🔄 Arrêt Gideon AI Production...")
         
         self.running = False
         
-        # Stop audio
+        # Arrêter audio
         audio_manager.stop_continuous_listening()
         audio_manager.cleanup()
         
-        # Stop memory monitoring
+        # Arrêter monitoring
         memory_monitor.stop_monitoring()
         
-        # Final memory report
-        report = memory_monitor.get_memory_report()
-        if not report.get('error'):
-            current = report['current']
-            stats = report['performance']
-            self.logger.info(f"📊 Final memory: {current['rss_mb']:.1f}MB "
-                           f"(peak: {report['statistics']['peak_mb']:.1f}MB)")
-            self.logger.info(f"📊 Performance: {stats['total_measurements']} measurements, "
-                           f"{stats['total_cleanups']} cleanups")
+        # Cleanup assistant
+        assistant_core.cleanup()
         
-        # Cleanup
-        if self.gideon_core:
-            memory_monitor.cleanup()
+        # Rapport final
+        final_report = memory_monitor.get_memory_report()
+        if not final_report.get('error'):
+            current = final_report['current']
+            self.logger.info(f"📊 Mémoire finale: {current['rss_mb']:.1f}MB")
         
         if self.app:
             self.app.quit()
         
-        self.logger.info("✅ Shutdown complete")
+        self.logger.info("✅ Arrêt terminé")
 
 def main():
-    """Main entry point"""
+    """Point d'entrée principal"""
     print("""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    🤖 GIDEON AI ASSISTANT                    ║
-║                     OPTIMIZED VERSION                        ║
+║                   PRODUCTION OPTIMIZED                       ║
 ╠══════════════════════════════════════════════════════════════╣
-║  ⚡ Performance Optimized   📊 Memory Monitored             ║
-║  🎤 Smart Audio Recognition 🧹 Auto Cleanup                 ║
-║  🔧 Debug Panel Included    💾 < 300MB Target               ║
+║  🎯 Wake Word Detection     🧠 AI + Fallbacks Robustes     ║
+║  🔧 Auto-Calibration macOS   💾 Mémoire < 250MB           ║  
+║  🏥 Health Monitoring       📊 Stats Temps Réel            ║
+║  ⚡ 100% Fonctionnel        🎤 Audio Ultra-Optimisé       ║
 ╚══════════════════════════════════════════════════════════════╝
     """)
     
-    app = GideonOptimizedApp()
-    app.run()
+    app = ProductionGideonApp()
+    return app.run()
 
 if __name__ == "__main__":
-    main() 
+    exit_code = main()
+    sys.exit(exit_code) 

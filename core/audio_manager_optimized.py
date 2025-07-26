@@ -1,13 +1,15 @@
 """
 Enhanced Audio Manager for Gideon AI Assistant
-Optimized for macOS with intelligent speech recognition and low memory usage
+PRODUCTION OPTIMIZED FOR MACOS - Auto-calibration + Wake Word Detection
 """
 
 import threading
 import time
 import logging
 import queue
-from typing import Optional, Callable
+import difflib
+import platform
+from typing import Optional, Callable, List
 from dataclasses import dataclass, field
 import gc
 
@@ -36,46 +38,170 @@ except ImportError:
 
 @dataclass
 class AudioConfig:
-    """Optimized audio configuration for macOS"""
-    # Reduced sample rate for lower memory usage
-    SAMPLE_RATE: int = 16000  # Down from 44100
+    """PRODUCTION audio configuration for macOS"""
+    # Optimized sample rate for macOS
+    SAMPLE_RATE: int = 16000
     CHUNK_SIZE: int = 1024
-    CHANNELS: int = 1  # Mono only
+    CHANNELS: int = 1
     
-    # Smart timeouts
-    LISTEN_TIMEOUT: float = 3.0  # Max listening time
-    PHRASE_TIMEOUT: float = 8.0  # Max phrase length
-    PAUSE_THRESHOLD: float = 0.8  # Silence detection
+    # Intelligent timeouts
+    LISTEN_TIMEOUT: float = 3.0
+    PHRASE_TIMEOUT: float = 6.0
+    PAUSE_THRESHOLD: float = 0.6
+    
+    # macOS specific optimizations
+    ENERGY_THRESHOLD: int = 250
+    DYNAMIC_ENERGY_THRESHOLD: bool = True
+    AMBIENT_NOISE_DURATION: float = 0.5
+    AUTO_CALIBRATE_INTERVAL: float = 60.0
     
     # Performance settings
-    AMBIENT_NOISE_DURATION: float = 0.3  # Reduced from 0.5
-    RETRY_DELAY: float = 1.0  # Pause between listen attempts
-    MAX_RETRIES: int = 3  # Max consecutive failures
+    RETRY_DELAY: float = 1.0
+    MAX_RETRIES: int = 3
     
     # Language settings
     LANGUAGE: str = "en-US"
     ALTERNATIVE_LANGUAGES: list = field(default_factory=lambda: ["fr-FR", "en-GB"])
+    
+    # Wake word settings
+    WAKE_WORDS: list = field(default_factory=lambda: [
+        "hey gideon", "hi gideon", "hello gideon",
+        "hey jarvis", "hi jarvis", "hello jarvis", 
+        "gideon", "jarvis", "computer", "assistant"
+    ])
+    WAKE_WORD_THRESHOLD: float = 0.75
 
 @dataclass
 class VoiceCommand:
-    """Voice command data structure"""
+    """Voice command data structure with wake word detection"""
     text: str
     confidence: float
     timestamp: float
     language: str = "en-US"
+    is_wake_word: bool = False
+    wake_word_matched: str = ""
+
+class MacOSAudioOptimizer:
+    """macOS specific audio optimizations"""
+    
+    @staticmethod
+    def check_macos_permissions():
+        """Vérifier et optimiser permissions microphone macOS"""
+        if platform.system() != "Darwin":
+            return True
+        
+        try:
+            # Test rapide d'accès micro
+            devices = sd.query_devices()
+            
+            # Chercher des devices d'entrée
+            input_devices = [d for d in devices if d['max_input_channels'] > 0]
+            
+            if not input_devices:
+                logging.warning("❌ Aucun device d'entrée audio détecté sur macOS")
+                return False
+            
+            logging.info(f"✅ {len(input_devices)} devices audio détectés sur macOS")
+            return True
+            
+        except Exception as e:
+            logging.error(f"❌ Erreur permissions audio macOS: {e}")
+            return False
+    
+    @staticmethod
+    def get_optimal_microphone():
+        """Obtenir le meilleur microphone pour macOS"""
+        if not HAS_SOUNDDEVICE:
+            return sr.Microphone()
+        
+        try:
+            devices = sd.query_devices()
+            
+            # Priorité aux devices avec "built-in" ou "internal"
+            best_device = None
+            best_score = 0
+            
+            for i, device in enumerate(devices):
+                if device['max_input_channels'] > 0:
+                    score = 0
+                    name_lower = device['name'].lower()
+                    
+                    # Bonus pour devices intégrés
+                    if any(keyword in name_lower for keyword in ['built-in', 'internal', 'macbook']):
+                        score += 10
+                    
+                    # Bonus pour sample rate élevé
+                    score += min(device['default_samplerate'] / 1000, 48)
+                    
+                    # Bonus pour channels
+                    score += device['max_input_channels']
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_device = i
+            
+            if best_device is not None:
+                device_info = devices[best_device]
+                logging.info(f"🎤 Microphone optimal: {device_info['name']} "
+                           f"({device_info['default_samplerate']}Hz)")
+                return sr.Microphone(device_index=best_device)
+            else:
+                logging.warning("⚠️ Utilisation microphone par défaut")
+                return sr.Microphone()
+                
+        except Exception as e:
+            logging.error(f"❌ Erreur sélection microphone: {e}")
+            return sr.Microphone()
+
+class WakeWordDetector:
+    """Détecteur de wake word intelligent avec fuzzy matching"""
+    
+    def __init__(self, wake_words: List[str], threshold: float = 0.75):
+        self.wake_words = [word.lower().strip() for word in wake_words]
+        self.threshold = threshold
+    
+    def detect_wake_word(self, text: str) -> tuple:
+        """Détecter wake word avec fuzzy matching"""
+        if not text:
+            return False, ""
+        
+        text_lower = text.lower().strip()
+        
+        # Recherche exacte d'abord
+        for wake_word in self.wake_words:
+            if wake_word in text_lower:
+                return True, wake_word
+        
+        # Fuzzy matching pour variations
+        best_match = ""
+        best_ratio = 0
+        
+        for wake_word in self.wake_words:
+            # Ratio de similarité
+            ratio = difflib.SequenceMatcher(None, wake_word, text_lower).ratio()
+            
+            if ratio > best_ratio and ratio >= self.threshold:
+                best_ratio = ratio
+                best_match = wake_word
+        
+        if best_match:
+            return True, f"{best_match} (fuzzy: {best_ratio:.2f})"
+        
+        return False, ""
 
 class AudioManager:
-    """Optimized audio manager with intelligent speech recognition"""
+    """PRODUCTION Audio Manager with macOS optimizations"""
     
     def __init__(self, config: AudioConfig = None):
         self.config = config or AudioConfig()
-        self.logger = logging.getLogger("AudioManager")
+        self.logger = logging.getLogger("AudioManagerPRO")
         
         # State management
         self.is_listening = False
         self.is_speaking = False
         self.consecutive_failures = 0
         self.last_successful_recognition = 0
+        self.last_calibration = 0
         
         # Components
         self.recognizer = None
@@ -84,122 +210,166 @@ class AudioManager:
         self.voice_queue = queue.Queue()
         self.listen_thread = None
         
+        # macOS optimizations
+        self.macos_optimizer = MacOSAudioOptimizer()
+        self.wake_word_detector = WakeWordDetector(
+            self.config.WAKE_WORDS, 
+            self.config.WAKE_WORD_THRESHOLD
+        )
+        
         # Performance monitoring
         self.stats = {
             'total_listens': 0,
             'successful_recognitions': 0,
+            'wake_words_detected': 0,
             'failures': 0,
-            'avg_response_time': 0
+            'avg_response_time': 0,
+            'calibrations': 0
         }
         
         self._initialize_components()
     
     def _initialize_components(self):
-        """Initialize audio components with error handling"""
+        """Initialize components with macOS optimizations"""
+        self.logger.info("🔧 Initialisation composants audio pour macOS...")
+        
+        # Vérifier permissions macOS
+        if not self.macos_optimizer.check_macos_permissions():
+            self.logger.warning("⚠️ Problèmes de permissions audio macOS détectés")
+        
         # Initialize speech recognition
         if HAS_SPEECH_RECOGNITION:
             try:
                 self.recognizer = sr.Recognizer()
                 
-                # Optimized recognizer settings
-                self.recognizer.energy_threshold = 300  # Adjust for ambient noise
-                self.recognizer.dynamic_energy_threshold = True
+                # Configuration optimisée macOS
+                self.recognizer.energy_threshold = self.config.ENERGY_THRESHOLD
+                self.recognizer.dynamic_energy_threshold = self.config.DYNAMIC_ENERGY_THRESHOLD
                 self.recognizer.pause_threshold = self.config.PAUSE_THRESHOLD
                 self.recognizer.operation_timeout = self.config.LISTEN_TIMEOUT
                 
-                # Get the best microphone
-                self.microphone = self._get_optimal_microphone()
+                # Microphone optimal
+                self.microphone = self.macos_optimizer.get_optimal_microphone()
                 
                 if self.microphone:
-                    self.logger.info("✅ Speech recognition initialized successfully")
+                    # Auto-calibration initiale
+                    self.auto_calibrate_microphone()
+                    self.logger.info("✅ Speech recognition initialisé avec succès")
                 else:
-                    self.logger.warning("⚠️ No suitable microphone found")
+                    self.logger.warning("⚠️ Microphone non disponible")
                     
             except Exception as e:
-                self.logger.error(f"❌ Failed to initialize speech recognition: {e}")
+                self.logger.error(f"❌ Échec initialisation speech recognition: {e}")
                 self.recognizer = None
                 self.microphone = None
         
-        # Initialize TTS
+        # Initialize TTS avec optimisations
         if HAS_TTS:
             try:
                 self.tts_engine = pyttsx3.init()
                 
-                # Optimize TTS settings
-                rate = self.tts_engine.getProperty('rate')
-                self.tts_engine.setProperty('rate', max(150, rate - 50))  # Slightly slower
+                # Configuration TTS optimisée
+                voices = self.tts_engine.getProperty('voices')
+                if voices:
+                    # Préférer voix système
+                    for voice in voices:
+                        if 'english' in voice.name.lower() or 'us' in voice.id.lower():
+                            self.tts_engine.setProperty('voice', voice.id)
+                            break
                 
-                volume = self.tts_engine.getProperty('volume')
-                self.tts_engine.setProperty('volume', min(1.0, volume + 0.1))
+                # Paramètres optimaux
+                self.tts_engine.setProperty('rate', 180)  # Vitesse optimale
+                self.tts_engine.setProperty('volume', 0.9)
                 
-                self.logger.info("✅ TTS engine initialized successfully")
+                self.logger.info("✅ TTS engine initialisé avec optimisations")
                 
             except Exception as e:
-                self.logger.error(f"❌ Failed to initialize TTS: {e}")
+                self.logger.error(f"❌ Échec initialisation TTS: {e}")
                 self.tts_engine = None
     
-    def _get_optimal_microphone(self) -> Optional[sr.Microphone]:
-        """Find the best microphone device"""
-        if not HAS_SOUNDDEVICE:
-            return sr.Microphone()  # Use default
+    def auto_calibrate_microphone(self) -> bool:
+        """Auto-calibration intelligente du microphone pour macOS"""
+        if not self.recognizer or not self.microphone:
+            return False
         
         try:
-            devices = sd.query_devices()
+            self.logger.info("🔧 Auto-calibration microphone macOS...")
             
-            # Find microphones with highest sample rate
-            best_device = None
-            best_rate = 0
-            
-            for i, device in enumerate(devices):
-                if device['max_input_channels'] > 0:  # Input device
-                    if device['default_samplerate'] > best_rate:
-                        best_rate = device['default_samplerate']
-                        best_device = i
-            
-            if best_device is not None:
-                self.logger.info(f"📱 Using microphone: {devices[best_device]['name']}")
-                return sr.Microphone(device_index=best_device)
-            else:
-                self.logger.warning("⚠️ No input devices found, using default")
-                return sr.Microphone()
+            with self.microphone as source:
+                # Calibration ambiante
+                old_threshold = self.recognizer.energy_threshold
+                
+                self.recognizer.adjust_for_ambient_noise(
+                    source, 
+                    duration=self.config.AMBIENT_NOISE_DURATION
+                )
+                
+                new_threshold = self.recognizer.energy_threshold
+                
+                # Validation du threshold
+                if new_threshold < 100:
+                    self.recognizer.energy_threshold = 200
+                    self.logger.warning("⚠️ Threshold trop bas, ajusté à 200")
+                elif new_threshold > 1000:
+                    self.recognizer.energy_threshold = 800
+                    self.logger.warning("⚠️ Threshold trop haut, ajusté à 800")
+                
+                self.last_calibration = time.time()
+                self.stats['calibrations'] += 1
+                
+                self.logger.info(f"✅ Calibration terminée: {old_threshold} → {self.recognizer.energy_threshold}")
+                return True
                 
         except Exception as e:
-            self.logger.error(f"❌ Error selecting microphone: {e}")
-            return sr.Microphone()  # Fallback to default
+            self.logger.error(f"❌ Erreur calibration: {e}")
+            return False
+    
+    def _should_recalibrate(self) -> bool:
+        """Déterminer si une re-calibration est nécessaire"""
+        # Re-calibration périodique
+        if time.time() - self.last_calibration > self.config.AUTO_CALIBRATE_INTERVAL:
+            return True
+        
+        # Re-calibration après échecs multiples
+        if self.consecutive_failures >= 3:
+            return True
+        
+        return False
     
     def test_microphone(self) -> bool:
-        """Test microphone functionality"""
+        """Test microphone avec auto-calibration"""
         if not self.recognizer or not self.microphone:
             return False
         
         try:
             with self.microphone as source:
-                self.logger.info("🎤 Testing microphone - speak something...")
+                self.logger.info("🎤 Test microphone avec auto-calibration...")
                 
-                # Quick ambient noise adjustment
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                # Auto-calibration si nécessaire
+                if self._should_recalibrate():
+                    self.auto_calibrate_microphone()
                 
-                # Short test listen
+                # Test d'écoute court
                 audio = self.recognizer.listen(source, timeout=2, phrase_time_limit=3)
                 
-                # Try to recognize
+                # Tentative de reconnaissance
                 text = self.recognizer.recognize_google(audio, language=self.config.LANGUAGE)
                 
-                self.logger.info(f"✅ Microphone test successful: '{text}'")
+                self.logger.info(f"✅ Test micro réussi: '{text}'")
                 return True
                 
         except sr.WaitTimeoutError:
-            self.logger.warning("⏰ Microphone test timeout - no speech detected")
+            self.logger.warning("⏰ Test micro timeout - aucune parole détectée")
             return False
         except sr.UnknownValueError:
-            self.logger.warning("❓ Microphone working but speech not understood")
-            return True  # Microphone works, just didn't understand
+            self.logger.info("✅ Micro fonctionne - parole non comprise (normal)")
+            return True
         except Exception as e:
-            self.logger.error(f"❌ Microphone test failed: {e}")
+            self.logger.error(f"❌ Test micro échoué: {e}")
             return False
     
     def listen_once(self) -> Optional[VoiceCommand]:
-        """Listen for a single voice command with optimizations"""
+        """Listen optimisé avec wake word detection"""
         if not self.recognizer or not self.microphone:
             return None
         
@@ -207,26 +377,33 @@ class AudioManager:
         self.stats['total_listens'] += 1
         
         try:
+            # Auto-calibration si nécessaire
+            if self._should_recalibrate():
+                self.auto_calibrate_microphone()
+            
             with self.microphone as source:
-                # Quick ambient adjustment only if needed
-                if time.time() - self.last_successful_recognition > 30:
-                    self.recognizer.adjust_for_ambient_noise(source, 
-                                                           duration=self.config.AMBIENT_NOISE_DURATION)
-                
-                # Listen with optimized timeouts
+                # Listen avec timeouts optimisés
                 audio = self.recognizer.listen(
                     source,
                     timeout=self.config.LISTEN_TIMEOUT,
                     phrase_time_limit=self.config.PHRASE_TIMEOUT
                 )
                 
-                # Try recognition with primary language
-                text = self.recognizer.recognize_google(
-                    audio, 
-                    language=self.config.LANGUAGE
-                )
+                # Reconnaissance avec langues multiples
+                text = None
+                for language in [self.config.LANGUAGE] + self.config.ALTERNATIVE_LANGUAGES:
+                    try:
+                        text = self.recognizer.recognize_google(audio, language=language)
+                        break
+                    except sr.UnknownValueError:
+                        continue
+                    except sr.RequestError:
+                        continue
                 
-                # Success!
+                if not text:
+                    return None
+                
+                # Success metrics
                 response_time = time.time() - start_time
                 self.last_successful_recognition = time.time()
                 self.consecutive_failures = 0
@@ -237,89 +414,96 @@ class AudioManager:
                 current_avg = self.stats['avg_response_time']
                 self.stats['avg_response_time'] = ((current_avg * (total_success - 1)) + response_time) / total_success
                 
+                # Wake word detection
+                is_wake, wake_matched = self.wake_word_detector.detect_wake_word(text)
+                if is_wake:
+                    self.stats['wake_words_detected'] += 1
+                
                 command = VoiceCommand(
                     text=text,
-                    confidence=1.0,  # Google API doesn't provide confidence
+                    confidence=1.0,
                     timestamp=time.time(),
-                    language=self.config.LANGUAGE
+                    language=self.config.LANGUAGE,
+                    is_wake_word=is_wake,
+                    wake_word_matched=wake_matched
                 )
                 
-                self.logger.info(f"🎤 Recognized: '{text}' ({response_time:.2f}s)")
+                self.logger.info(f"🎤 Reconnu: '{text}' ({response_time:.2f}s)"
+                                + (f" WAKE: {wake_matched}" if is_wake else ""))
                 return command
                 
         except sr.WaitTimeoutError:
-            # Normal timeout - not an error
             return None
-            
         except sr.UnknownValueError:
-            # Speech was detected but not understood
-            self.logger.debug("❓ Speech detected but not recognized")
+            self.logger.debug("❓ Parole détectée mais non reconnue")
             return None
-            
         except sr.RequestError as e:
-            self.logger.error(f"❌ Speech recognition service error: {e}")
+            self.logger.error(f"❌ Erreur service reconnaissance: {e}")
             self.consecutive_failures += 1
-            
         except Exception as e:
-            self.logger.error(f"❌ Unexpected error in speech recognition: {e}")
+            self.logger.error(f"❌ Erreur inattendue reconnaissance: {e}")
             self.consecutive_failures += 1
         
-        # Handle failures
+        # Gestion des échecs
         self.stats['failures'] += 1
         
-        # If too many consecutive failures, take a longer break
+        # Pause prolongée après échecs multiples
         if self.consecutive_failures >= self.config.MAX_RETRIES:
-            self.logger.warning(f"⚠️ {self.consecutive_failures} consecutive failures, taking extended break")
-            time.sleep(5.0)  # Longer break
+            self.logger.warning(f"⚠️ {self.consecutive_failures} échecs consécutifs - pause prolongée")
+            time.sleep(5.0)
             self.consecutive_failures = 0
         
         return None
     
     def start_continuous_listening(self):
-        """Start optimized continuous listening"""
+        """Start optimized continuous listening with wake word detection"""
         if not self.recognizer or not self.microphone:
-            self.logger.warning("❌ Cannot start listening - speech recognition not available")
+            self.logger.warning("❌ Impossible d'écouter - reconnaissance vocale indisponible")
             return
         
         if self.is_listening:
-            self.logger.warning("⚠️ Already listening")
+            self.logger.warning("⚠️ Déjà en écoute")
             return
         
-        def _optimized_listen_loop():
-            self.logger.info("🎤 Starting optimized listening loop...")
+        def _intelligent_listen_loop():
+            self.logger.info("🎤 Démarrage écoute intelligente avec wake word...")
             
             while self.is_listening:
-                # Check if we should take a break
+                # Vérification état et pause si nécessaire
                 if self.consecutive_failures >= self.config.MAX_RETRIES:
-                    time.sleep(self.config.RETRY_DELAY * 2)  # Extended break
+                    time.sleep(self.config.RETRY_DELAY * 2)
                     continue
                 
-                # Listen for command
+                # Écoute de commande
                 command = self.listen_once()
                 
                 if command:
-                    # Put command in queue for processing
+                    # Mettre en queue pour traitement
                     self.voice_queue.put(command)
                     
-                    # Short break after successful recognition
-                    time.sleep(0.5)
+                    # Log spécial pour wake words
+                    if command.is_wake_word:
+                        self.logger.info(f"🎯 WAKE WORD détecté: {command.wake_word_matched}")
+                    
+                    # Pause courte après succès
+                    time.sleep(0.3)
                 else:
-                    # Intelligent retry delay based on failure rate
+                    # Délai intelligent basé sur taux d'échec
                     delay = self.config.RETRY_DELAY
                     if self.consecutive_failures > 0:
-                        delay *= (1 + self.consecutive_failures * 0.5)
+                        delay *= (1 + self.consecutive_failures * 0.3)
                     
-                    time.sleep(min(delay, 5.0))  # Cap at 5 seconds
+                    time.sleep(min(delay, 3.0))
                 
-                # Periodic memory cleanup
-                if self.stats['total_listens'] % 100 == 0:
+                # Nettoyage mémoire périodique
+                if self.stats['total_listens'] % 50 == 0:
                     gc.collect()
         
         self.is_listening = True
-        self.listen_thread = threading.Thread(target=_optimized_listen_loop, daemon=True)
+        self.listen_thread = threading.Thread(target=_intelligent_listen_loop, daemon=True)
         self.listen_thread.start()
         
-        self.logger.info("🎤 Continuous listening started with optimizations")
+        self.logger.info("🎤 Écoute continue démarrée avec optimisations macOS")
     
     def stop_continuous_listening(self):
         """Stop continuous listening"""
@@ -331,30 +515,40 @@ class AudioManager:
         if self.listen_thread:
             self.listen_thread.join(timeout=2.0)
         
-        self.logger.info("🔇 Continuous listening stopped")
+        self.logger.info("🔇 Écoute continue arrêtée")
     
     def speak(self, text: str) -> bool:
-        """Text-to-speech with optimization"""
+        """TTS optimisé avec gestion concurrence"""
         if not self.tts_engine:
-            self.logger.info(f"🔊 [NO TTS] {text}")
+            self.logger.info(f"🔊 [PAS DE TTS] {text}")
             return False
         
         if self.is_speaking:
-            self.logger.warning("⚠️ Already speaking, skipping")
+            self.logger.warning("⚠️ Déjà en train de parler - ignoré")
             return False
         
         try:
             self.is_speaking = True
-            self.tts_engine.say(text)
-            self.tts_engine.runAndWait()
+            
+            # TTS dans thread séparé pour éviter blocage
+            def _speak():
+                try:
+                    self.tts_engine.say(text)
+                    self.tts_engine.runAndWait()
+                except Exception as e:
+                    self.logger.error(f"❌ Erreur TTS: {e}")
+                finally:
+                    self.is_speaking = False
+            
+            speak_thread = threading.Thread(target=_speak, daemon=True)
+            speak_thread.start()
+            
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ TTS error: {e}")
-            return False
-            
-        finally:
+            self.logger.error(f"❌ Erreur TTS: {e}")
             self.is_speaking = False
+            return False
     
     def get_next_command(self, timeout: float = None) -> Optional[VoiceCommand]:
         """Get next voice command from queue"""
@@ -364,24 +558,34 @@ class AudioManager:
             return None
     
     def get_stats(self) -> dict:
-        """Get performance statistics"""
+        """Get enhanced performance statistics"""
         success_rate = 0
+        wake_word_rate = 0
+        
         if self.stats['total_listens'] > 0:
             success_rate = (self.stats['successful_recognitions'] / self.stats['total_listens']) * 100
+        
+        if self.stats['successful_recognitions'] > 0:
+            wake_word_rate = (self.stats['wake_words_detected'] / self.stats['successful_recognitions']) * 100
         
         return {
             'total_listens': self.stats['total_listens'],
             'successful_recognitions': self.stats['successful_recognitions'],
+            'wake_words_detected': self.stats['wake_words_detected'],
             'failures': self.stats['failures'],
+            'calibrations': self.stats['calibrations'],
             'success_rate': f"{success_rate:.1f}%",
+            'wake_word_rate': f"{wake_word_rate:.1f}%",
             'avg_response_time': f"{self.stats['avg_response_time']:.2f}s",
             'consecutive_failures': self.consecutive_failures,
             'is_listening': self.is_listening,
-            'is_speaking': self.is_speaking
+            'is_speaking': self.is_speaking,
+            'energy_threshold': getattr(self.recognizer, 'energy_threshold', 0),
+            'last_calibration': f"{time.time() - self.last_calibration:.1f}s ago" if self.last_calibration else "Never"
         }
     
     def cleanup(self):
-        """Clean up resources"""
+        """Enhanced cleanup with macOS optimizations"""
         self.stop_continuous_listening()
         
         if self.tts_engine:
@@ -397,7 +601,7 @@ class AudioManager:
             except queue.Empty:
                 break
         
-        self.logger.info("🧹 Audio manager cleanup completed")
+        self.logger.info("🧹 Audio manager cleanup terminé (optimisé macOS)")
 
 # Global audio manager instance
 audio_manager = AudioManager() 

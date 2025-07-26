@@ -1,10 +1,18 @@
 """
 Core module for Gideon AI Assistant
-Contains base classes and core functionality
+Updated imports for production version
 """
 
-from .assistant_core_production import GideonCoreProduction
-from .event_system import EventSystem
 from .logger import GideonLogger
+from .event_system import EventSystem
+from .memory_monitor import MemoryMonitor
+from .assistant_core_production import AssistantCore
+from .audio_manager_optimized import AudioManager
 
-__all__ = ['GideonCoreProduction', 'EventSystem', 'GideonLogger'] 
+__all__ = [
+    'GideonLogger',
+    'EventSystem', 
+    'MemoryMonitor',
+    'AssistantCore',
+    'AudioManager'
+] 
