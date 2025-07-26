@@ -1,0 +1,38 @@
+# Gideon AI Assistant - Optimized Dependencies
+# Version allégée pour performance maximale
+
+# Core AI
+openai>=1.0.0
+
+# Audio Processing (Optimized)
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+sounddevice>=0.4.6
+pyaudio>=0.2.11
+
+# GUI (Optional - fallback to console if not available)
+PyQt6>=6.4.0,<6.7.0
+PyQt6-Qt6>=6.4.0,<6.7.0  
+PyQt6-sip>=13.0.0,<14.0.0
+
+# Computer Vision (Lightweight alternative)
+opencv-python>=4.8.0,<5.0.0
+mtcnn>=0.1.1
+
+# Machine Learning (CPU optimized)
+tensorflow>=2.10.0,<2.16.0
+numpy>=1.21.0,<2.0.0
+
+# System Monitoring
+psutil>=5.9.0
+
+# HTTP Requests
+requests>=2.28.0
+
+# Logging and Utils
+dataclasses-json>=0.5.0
+typing-extensions>=4.0.0
+
+# Development and Testing (Optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0 
