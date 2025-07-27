@@ -1,22 +1,19 @@
 # ================================================================
 # GIDEON AI ASSISTANT - PRODUCTION REQUIREMENTS
-# Versions testées et verrouillées pour compatibilité maximale
-# Date: 2024 - Résolution complète des 10 problèmes critiques
+# 100% LOCAL avec Ollama - AUCUNE dépendance externe
+# Date: 2024 - Migration complète vers Ollama local
 # ================================================================
 
 # =====================================
 # CORE DEPENDENCIES - CRITICAL
 # =====================================
 
-# OpenAI API - NOUVELLE VERSION (résout Problème #1)
-openai>=1.0.0,<2.0.0
-
 # Interface graphique - STABLE (évite bugs 6.7+)
 PyQt6>=6.4.0,<6.7.0
 
 # Computing base
 numpy>=1.21.0,<1.26.0          # Compatible avec tout
-requests>=2.28.0,<3.0.0        # HTTP requests stable
+requests>=2.28.0,<3.0.0        # HTTP requests pour Ollama
 psutil>=5.9.0,<6.0.0           # System monitoring
 
 # =====================================
@@ -43,6 +40,18 @@ opencv-python>=4.7.0,<4.9.0    # Computer vision
 mtcnn>=0.1.1,<1.0.0           # Face detection lightweight
 tensorflow-cpu>=2.10.0,<2.14.0  # Backend MTCNN (CPU only)
 Pillow>=9.0.0,<11.0.0         # Image processing
+
+# =====================================
+# LOCAL AI avec Ollama - 100% OFFLINE
+# =====================================
+
+# Pas de dépendance OpenAI - Ollama utilise HTTP requests
+# requests déjà inclus ci-dessus
+
+# Embeddings et mémoire vectorielle locale
+sentence-transformers>=2.2.0   # Local embeddings
+chromadb>=0.4.0                # Local vector database
+transformers>=4.30.0           # Hugging Face transformers
 
 # =====================================
 # DEVELOPMENT & QUALITY
@@ -94,16 +103,18 @@ memory-profiler>=0.60.0        # Memory usage tracking
 # Python 3.11 + numpy 1.25 + tensorflow 2.13 + opencv 4.8 = ✅
 
 # =====================================
-# INSTALLATION NOTES
+# INSTALLATION NOTES - OLLAMA
 # =====================================
 
-# Pour éviter les conflits:
-# 1. pip install --upgrade pip setuptools wheel
-# 2. pip install numpy (en premier)
-# 3. pip install -r requirements_production.txt
-# 4. python test_system.py (validation)
+# Pour migration OpenAI -> Ollama:
+# 1. Désinstaller OpenAI: pip uninstall openai
+# 2. Installer Ollama: brew install ollama (macOS) ou voir ollama.ai
+# 3. Démarrer Ollama: ollama serve
+# 4. Installer modèles: ollama pull mistral:7b && ollama pull llama3:8b
+# 5. Tester: curl http://localhost:11434/api/tags
 
 # Alternative si échec:
 # conda create -n gideon python=3.9
 # conda activate gideon
 # pip install -r requirements_production.txt 
+# ollama serve 

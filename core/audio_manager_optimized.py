@@ -38,7 +38,7 @@ except ImportError:
 
 @dataclass
 class AudioConfig:
-    """PRODUCTION audio configuration for macOS"""
+    """PRODUCTION audio configuration for macOS - FRANÇAIS"""
     # Optimized sample rate for macOS
     SAMPLE_RATE: int = 16000
     CHUNK_SIZE: int = 1024
@@ -59,25 +59,25 @@ class AudioConfig:
     RETRY_DELAY: float = 1.0
     MAX_RETRIES: int = 3
     
-    # Language settings
-    LANGUAGE: str = "en-US"
-    ALTERNATIVE_LANGUAGES: list = field(default_factory=lambda: ["fr-FR", "en-GB"])
+    # Language settings - FRANÇAIS PAR DÉFAUT
+    LANGUAGE: str = "fr-FR"
+    ALTERNATIVE_LANGUAGES: list = field(default_factory=lambda: ["en-US", "en-GB"])
     
-    # Wake word settings
+    # Wake word settings - FRANÇAIS
     WAKE_WORDS: list = field(default_factory=lambda: [
-        "hey gideon", "hi gideon", "hello gideon",
-        "hey jarvis", "hi jarvis", "hello jarvis", 
-        "gideon", "jarvis", "computer", "assistant"
+        "salut gideon", "bonjour gideon", "hey gideon",
+        "salut jarvis", "bonjour jarvis", "hey jarvis", 
+        "gideon", "jarvis", "ordinateur", "assistant"
     ])
     WAKE_WORD_THRESHOLD: float = 0.75
 
 @dataclass
 class VoiceCommand:
-    """Voice command data structure with wake word detection"""
+    """Voice command data structure with wake word detection - FRANÇAIS"""
     text: str
     confidence: float
     timestamp: float
-    language: str = "en-US"
+    language: str = "fr-FR"
     is_wake_word: bool = False
     wake_word_matched: str = ""
 
@@ -189,64 +189,146 @@ class WakeWordDetector:
         
         return False, ""
 
-class AudioManager:
-    """PRODUCTION Audio Manager with macOS optimizations"""
+class FrenchVoiceManager:
+    """Gestionnaire de voix françaises pour macOS"""
     
-    def __init__(self, config: AudioConfig = None):
-        self.config = config or AudioConfig()
-        self.logger = logging.getLogger("AudioManagerPRO")
+    def __init__(self, tts_engine):
+        self.tts_engine = tts_engine
+        self.logger = logging.getLogger("FrenchVoice")
         
-        # State management
-        self.is_listening = False
-        self.is_speaking = False
-        self.consecutive_failures = 0
-        self.last_successful_recognition = 0
-        self.last_calibration = 0
+    def configure_french_voice(self):
+        """Configure la meilleure voix française disponible sur macOS"""
+        if not self.tts_engine:
+            return False
+            
+        try:
+            voices = self.tts_engine.getProperty('voices')
+            if not voices:
+                self.logger.warning("Aucune voix disponible")
+                return False
+            
+            # Voix françaises prioritaires macOS
+            french_voice_priorities = [
+                'com.apple.speech.synthesis.voice.thomas',      # Thomas (FR)
+                'com.apple.voice.compact.fr-FR.Thomas',
+                'com.apple.speech.synthesis.voice.virginie',    # Virginie (FR)
+                'com.apple.voice.compact.fr-FR.Virginie',
+                'com.apple.eloquence.fr-FR.Grandpa',
+                'com.apple.eloquence.fr-FR.Grandma'
+            ]
+            
+            # Recherche voix française par priorité
+            for priority_voice in french_voice_priorities:
+                for voice in voices:
+                    if priority_voice in voice.id:
+                        self.tts_engine.setProperty('voice', voice.id)
+                        self.logger.info(f"✅ Voix française configurée: {voice.name}")
+                        return True
+            
+            # Fallback: chercher toute voix contenant "fr" ou "French"
+            for voice in voices:
+                if ('fr' in voice.id.lower() or 
+                    'french' in voice.name.lower() or
+                    'français' in voice.name.lower()):
+                    self.tts_engine.setProperty('voice', voice.id)
+                    self.logger.info(f"✅ Voix française trouvée: {voice.name}")
+                    return True
+            
+            # Dernière option: lister toutes les voix pour debug
+            self.logger.warning("❌ Aucune voix française trouvée")
+            self.logger.info("Voix disponibles:")
+            for i, voice in enumerate(voices[:5]):  # Montrer 5 premières
+                self.logger.info(f"  {i}: {voice.name} ({voice.id})")
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur configuration voix française: {e}")
+            return False
+    
+    def configure_french_speech_params(self):
+        """Configure les paramètres optimaux pour le français"""
+        try:
+            # Vitesse adaptée au français (plus lent que l'anglais)
+            self.tts_engine.setProperty('rate', 160)  # Plus naturel
+            
+            # Volume optimal
+            self.tts_engine.setProperty('volume', 0.8)
+            
+            self.logger.info("✅ Paramètres vocaux français configurés")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur paramètres français: {e}")
+            return False
+    
+    def test_french_speech(self):
+        """Test de la synthèse vocale française"""
+        test_phrases = [
+            "Bonjour ! Je suis Gideon, votre assistant français.",
+            "J'espère que ma voix française vous convient.",
+            "Je peux maintenant vous parler en français."
+        ]
+        
+        for phrase in test_phrases:
+            try:
+                self.logger.info(f"🔊 Test: {phrase}")
+                self.tts_engine.say(phrase)
+                self.tts_engine.runAndWait()
+                time.sleep(0.5)  # Pause entre phrases
+            except Exception as e:
+                self.logger.error(f"❌ Erreur test vocal: {e}")
+                return False
+        
+        return True
+
+
+class EnhancedAudioManager:
+    """PRODUCTION Audio Manager with macOS optimizations - FRANÇAIS INTÉGRÉ"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger("AudioManagerPRO")
+        self.config = AudioConfig()
         
         # Components
         self.recognizer = None
         self.microphone = None
         self.tts_engine = None
-        self.voice_queue = queue.Queue()
-        self.listen_thread = None
+        self.french_voice_manager = None  # Nouveau gestionnaire français
         
-        # macOS optimizations
-        self.macos_optimizer = MacOSAudioOptimizer()
-        self.wake_word_detector = WakeWordDetector(
-            self.config.WAKE_WORDS, 
-            self.config.WAKE_WORD_THRESHOLD
-        )
+        # State management
+        self.is_calibrated = False
+        self.last_calibration = 0
+        self.consecutive_failures = 0
         
-        # Performance monitoring
+        # Statistiques
         self.stats = {
             'total_listens': 0,
             'successful_recognitions': 0,
+            'failed_recognitions': 0,
             'wake_words_detected': 0,
-            'failures': 0,
-            'avg_response_time': 0,
-            'calibrations': 0
+            'last_calibration': 'Never',
+            'consecutive_failures': 0
         }
         
+        # Optimisations macOS
+        self.macos_optimizer = MacOSAudioOptimizer()
+        
+        # Initialize
         self._initialize_components()
-    
+        
     def _initialize_components(self):
-        """Initialize components with macOS optimizations"""
-        self.logger.info("🔧 Initialisation composants audio pour macOS...")
-        
-        # Vérifier permissions macOS
-        if not self.macos_optimizer.check_macos_permissions():
-            self.logger.warning("⚠️ Problèmes de permissions audio macOS détectés")
-        
-        # Initialize speech recognition
+        """Initialise tous les composants audio français"""
+        # Speech recognition optimisé
         if HAS_SPEECH_RECOGNITION:
             try:
                 self.recognizer = sr.Recognizer()
                 
-                # Configuration optimisée macOS
+                # Configuration française optimisée
                 self.recognizer.energy_threshold = self.config.ENERGY_THRESHOLD
                 self.recognizer.dynamic_energy_threshold = self.config.DYNAMIC_ENERGY_THRESHOLD
                 self.recognizer.pause_threshold = self.config.PAUSE_THRESHOLD
-                self.recognizer.operation_timeout = self.config.LISTEN_TIMEOUT
+                self.recognizer.phrase_threshold = 0.3  # Optimisé pour français
                 
                 # Microphone optimal
                 self.microphone = self.macos_optimizer.get_optimal_microphone()
@@ -254,38 +336,38 @@ class AudioManager:
                 if self.microphone:
                     # Auto-calibration initiale
                     self.auto_calibrate_microphone()
-                    self.logger.info("✅ Speech recognition initialisé avec succès")
+                    self.logger.info("✅ Speech recognition français initialisé")
                 else:
                     self.logger.warning("⚠️ Microphone non disponible")
                     
             except Exception as e:
-                self.logger.error(f"❌ Échec initialisation speech recognition: {e}")
+                self.logger.error(f"❌ Échec speech recognition: {e}")
                 self.recognizer = None
                 self.microphone = None
         
-        # Initialize TTS avec optimisations
+        # TTS français avec optimisations
         if HAS_TTS:
             try:
                 self.tts_engine = pyttsx3.init()
                 
-                # Configuration TTS optimisée
-                voices = self.tts_engine.getProperty('voices')
-                if voices:
-                    # Préférer voix système
-                    for voice in voices:
-                        if 'english' in voice.name.lower() or 'us' in voice.id.lower():
-                            self.tts_engine.setProperty('voice', voice.id)
-                            break
+                # Gestionnaire de voix françaises
+                self.french_voice_manager = FrenchVoiceManager(self.tts_engine)
                 
-                # Paramètres optimaux
-                self.tts_engine.setProperty('rate', 180)  # Vitesse optimale
-                self.tts_engine.setProperty('volume', 0.9)
-                
-                self.logger.info("✅ TTS engine initialisé avec optimisations")
+                # Configuration voix française
+                voice_configured = self.french_voice_manager.configure_french_voice()
+                if voice_configured:
+                    self.french_voice_manager.configure_french_speech_params()
+                    self.logger.info("✅ TTS français configuré avec voix française")
+                else:
+                    # Fallback configuration
+                    self.tts_engine.setProperty('rate', 160)
+                    self.tts_engine.setProperty('volume', 0.8)
+                    self.logger.warning("⚠️ TTS configuré sans voix française spécifique")
                 
             except Exception as e:
-                self.logger.error(f"❌ Échec initialisation TTS: {e}")
+                self.logger.error(f"❌ Échec TTS français: {e}")
                 self.tts_engine = None
+                self.french_voice_manager = None
     
     def auto_calibrate_microphone(self) -> bool:
         """Auto-calibration intelligente du microphone pour macOS"""
@@ -517,37 +599,136 @@ class AudioManager:
         
         self.logger.info("🔇 Écoute continue arrêtée")
     
-    def speak(self, text: str) -> bool:
-        """TTS optimisé avec gestion concurrence"""
+    def speak(self, text: str, force_french: bool = True) -> bool:
+        """Synthèse vocale française optimisée"""
         if not self.tts_engine:
-            self.logger.info(f"🔊 [PAS DE TTS] {text}")
-            return False
-        
-        if self.is_speaking:
-            self.logger.warning("⚠️ Déjà en train de parler - ignoré")
+            self.logger.error("❌ TTS engine non disponible")
             return False
         
         try:
-            self.is_speaking = True
+            # Traitement du texte pour le français
+            if force_french and text:
+                # Nettoyage du texte pour meilleure prononciation française
+                processed_text = self._process_french_text(text)
+            else:
+                processed_text = text
             
-            # TTS dans thread séparé pour éviter blocage
-            def _speak():
-                try:
-                    self.tts_engine.say(text)
-                    self.tts_engine.runAndWait()
-                except Exception as e:
-                    self.logger.error(f"❌ Erreur TTS: {e}")
-                finally:
-                    self.is_speaking = False
+            self.logger.info(f"🔊 Gideon dit (FR): {processed_text}")
             
-            speak_thread = threading.Thread(target=_speak, daemon=True)
-            speak_thread.start()
+            # Synthèse vocale
+            self.tts_engine.say(processed_text)
+            self.tts_engine.runAndWait()
             
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ Erreur TTS: {e}")
-            self.is_speaking = False
+            self.logger.error(f"❌ Erreur synthèse vocale française: {e}")
+            return False
+    
+    def _process_french_text(self, text: str) -> str:
+        """Améliore le texte pour la synthèse vocale française"""
+        if not text:
+            return text
+        
+        # Remplacements pour meilleure prononciation française
+        replacements = {
+            ' IA ': ' intelligence artificielle ',
+            ' AI ': ' intelligence artificielle ',
+            ' OK ': ' d\'accord ',
+            ' email ': ' courriel ',
+            ' emails ': ' courriels ',
+            ' web ': ' ouèbe ',
+            ' wifi ': ' wi-fi ',
+            ' bluetooth ': ' bluetooth ',
+            '°C': ' degrés Celsius',
+            '°F': ' degrés Fahrenheit',
+            ' USD ': ' dollars américains ',
+            ' EUR ': ' euros ',
+        }
+        
+        processed = text
+        for old, new in replacements.items():
+            processed = processed.replace(old, new)
+        
+        return processed
+    
+    def test_french_audio_complete(self) -> bool:
+        """Test complet du système audio français"""
+        self.logger.info("🇫🇷 Test Audio Français Complet")
+        
+        success = True
+        
+        # Test 1: Configuration voix française
+        if self.french_voice_manager:
+            voice_test = self.french_voice_manager.test_french_speech()
+            if not voice_test:
+                success = False
+        else:
+            self.logger.warning("⚠️ Gestionnaire voix française non disponible")
+            success = False
+        
+        # Test 2: Reconnaissance vocale française
+        if self.recognizer and self.microphone:
+            self.logger.info("🎤 Test reconnaissance vocale française")
+            self.logger.info("Dites quelque chose en français dans 3 secondes...")
+            time.sleep(3)
+            
+            mic_test = self.test_microphone_french()
+            if not mic_test:
+                success = False
+        else:
+            self.logger.warning("⚠️ Reconnaissance vocale non disponible")
+            success = False
+        
+        # Test 3: Synthèse de phrases françaises complexes
+        test_phrases = [
+            "Bonjour ! Je suis votre assistant Gideon.",
+            "Je peux maintenant vous parler parfaitement en français.",
+            "Ma reconnaissance vocale française fonctionne correctement.",
+            "Voulez-vous tester d'autres fonctionnalités ?"
+        ]
+        
+        for phrase in test_phrases:
+            if not self.speak(phrase, force_french=True):
+                success = False
+                break
+            time.sleep(1)  # Pause entre phrases
+        
+        if success:
+            self.logger.info("✅ Test audio français complet RÉUSSI")
+        else:
+            self.logger.error("❌ Test audio français complet ÉCHOUÉ")
+        
+        return success
+    
+    def test_microphone_french(self) -> bool:
+        """Test microphone spécifiquement pour le français"""
+        if not self.recognizer or not self.microphone:
+            return False
+        
+        try:
+            with self.microphone as source:
+                self.logger.info("🎤 Parlez en français maintenant...")
+                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=3)
+            
+            # Reconnaissance française
+            text = self.recognizer.recognize_google(audio, language="fr-FR")
+            self.logger.info(f"✅ Reconnu en français: '{text}'")
+            
+            # Confirmer par synthèse vocale
+            confirmation = f"J'ai entendu: {text}"
+            self.speak(confirmation, force_french=True)
+            
+            return True
+            
+        except sr.WaitTimeoutError:
+            self.logger.warning("⏰ Timeout - aucune parole française détectée")
+            return False
+        except sr.UnknownValueError:
+            self.logger.warning("❓ Parole française non comprise")
+            return False
+        except Exception as e:
+            self.logger.error(f"❌ Erreur test micro français: {e}")
             return False
     
     def get_next_command(self, timeout: float = None) -> Optional[VoiceCommand]:
@@ -603,5 +784,5 @@ class AudioManager:
         
         self.logger.info("🧹 Audio manager cleanup terminé (optimisé macOS)")
 
-# Global audio manager instance
-audio_manager = AudioManager() 
+# Instance globale corrigée pour le français
+audio_manager = EnhancedAudioManager() 

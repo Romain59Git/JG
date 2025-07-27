@@ -93,12 +93,13 @@ class GideonHealthMonitor:
     def check_ai_health(self) -> str:
         """Vérifier santé système IA"""
         try:
-            if not assistant_core.api_available:
+            # Utiliser la bonne interface AssistantCore Ollama
+            if not assistant_core.ollama_client.is_available:
                 return 'WARNING'  # Fallbacks disponibles
             
-            # Test simple API
-            test_response = assistant_core.generate_ai_response("test")
-            if test_response and "technical difficulties" not in test_response.lower():
+            # Test simple API avec la nouvelle interface
+            test_result = assistant_core.generate_ai_response("test")
+            if test_result and test_result.get('success', False):
                 return 'HEALTHY'
             else:
                 return 'WARNING'
@@ -355,16 +356,58 @@ class ProductionDebugPanel(QWidget):
             self.log_message(f"❌ Erreur update stats: {e}")
     
     def toggle_listening(self):
-        """Toggle audio listening"""
+        """Toggle audio listening français"""
         try:
-            if audio_manager.is_listening:
-                audio_manager.stop_continuous_listening()
-                self.log_message("🔇 Listening arrêté")
+            # Vérifier disponibilité audio
+            if not audio_manager.recognizer or not audio_manager.microphone:
+                self.log_message("❌ Système audio non disponible")
+                return
+            
+            # Implementation écoute française
+            if hasattr(audio_manager, 'is_listening') and audio_manager.is_listening:
+                # Arrêter l'écoute
+                if hasattr(audio_manager, 'stop_continuous_listening'):
+                    audio_manager.stop_continuous_listening()
+                self.listen_btn.setText("🎤 Commencer l'écoute")
+                self.log_message("🔇 Écoute française arrêtée")
             else:
-                audio_manager.start_continuous_listening()
-                self.log_message("🎤 Listening démarré")
+                # Démarrer l'écoute française
+                self.log_message("🎤 Démarrage écoute française...")
+                
+                # Test microphone français d'abord
+                if hasattr(audio_manager, 'test_microphone_french'):
+                    mic_test = audio_manager.test_microphone_french()
+                    if not mic_test:
+                        self.log_message("❌ Test microphone français échoué")
+                        return
+                
+                # Commencer écoute continue française
+                if hasattr(audio_manager, 'start_continuous_listening'):
+                    audio_manager.start_continuous_listening()
+                elif hasattr(audio_manager, 'listen_continuously'):
+                    # Fallback avec callback français
+                    def process_french_voice(text):
+                        self.log_message(f"🗣️ Entendu (FR): {text}")
+                        # Traiter avec Ollama français
+                        try:
+                            result = assistant_core.generate_ai_response(text)
+                            if result and result.get('success'):
+                                response = result['response']
+                                self.log_message(f"🤖 Gideon: {response}")
+                                # Parler en français
+                                audio_manager.speak(response, force_french=True)
+                        except Exception as e:
+                            self.log_message(f"❌ Erreur traitement français: {e}")
+                    
+                    audio_manager.listen_continuously(process_french_voice)
+                
+                self.listen_btn.setText("🔇 Arrêter l'écoute")
+                self.log_message("✅ Écoute française active")
+                
         except Exception as e:
-            self.log_message(f"❌ Erreur toggle listening: {e}")
+            self.log_message(f"❌ Erreur toggle listening français: {e}")
+            # Reset bouton en cas d'erreur
+            self.listen_btn.setText("🎤 Commencer l'écoute")
     
     def run_quick_test(self):
         """Test rapide du système"""
@@ -522,10 +565,13 @@ class ProductionGideonApp:
                                     # Parler la réponse
                                     audio_manager.speak(result['response'])
                                     
+                                    # Utiliser 'response_time' au lieu de 'processing_time'
+                                    response_time = result.get('response_time', 0)
                                     self.logger.info(f"🤖 Réponse: '{result['response']}' "
-                                                   f"({result['processing_time']:.2f}s)")
+                                                   f"({response_time:.2f}s)")
                                 else:
-                                    self.logger.error(f"❌ Erreur traitement: {result.get('error', 'Unknown')}")
+                                    error_msg = result.get('error', 'Unknown')
+                                    self.logger.error(f"❌ Erreur traitement: {error_msg}")
                                     
                             except Exception as e:
                                 self.logger.error(f"❌ Erreur process_command: {e}")

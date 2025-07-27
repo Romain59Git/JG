@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-Gideon AI Assistant - System Validation Production
-Script de validation complète résolvant le Problème #8
+Gideon AI Assistant - Production System Validator
+Tests complets pour validation système avec Ollama local
 
-Tests automatiques:
-- ✅ Compatibilité Python et OS
-- ✅ Toutes les dépendances critiques et optionnelles
-- ✅ Permissions système (microphone, caméra)
-- ✅ Performance et mémoire disponible
-- ✅ Configuration OpenAI
-- ✅ Capacités audio/vidéo
-- ✅ Interface graphique
-- ✅ Recommandations personnalisées
+Fonctionnalités testées:
+- ✅ Environnement Python et dépendances
+- ✅ Configuration Ollama local (100% offline)
+- ✅ Système audio et reconnaissance vocale
+- ✅ Interface graphique PyQt6
+- ✅ Monitoring hardware
+- ✅ Permissions système
+- ✅ Structure du projet
 """
 
 import sys
@@ -155,17 +154,27 @@ class SystemValidatorProduction:
         """Test dépendances critiques"""
         self.print_header("📦 DÉPENDANCES CRITIQUES")
         
-        critical_deps = {
-            'openai': "OpenAI API",
-            'PyQt6': "Interface graphique",
-            'requests': "Requêtes HTTP",
+        # Mapping nom package -> description
+        package_descriptions = {
             'psutil': "Monitoring système",
-            'numpy': "Calculs numériques"
+            'requests': "Requêtes HTTP pour Ollama",
+            'numpy': "Calculs numériques",
+            'PyQt6': "Interface graphique",
+            'sounddevice': "Audio input/output",
+            'pyttsx3': "Text-to-speech",
+            'SpeechRecognition': "Speech recognition",
+            'opencv-python': "Computer vision",
+            'mtcnn': "Face detection",
+            'tensorflow-cpu': "Machine learning",
+            'Pillow': "Image processing",
+            'scipy': "Signal processing",
+            'sentence-transformers': "Local embeddings",
+            'chromadb': "Vector database"
         }
         
         all_critical_ok = True
         
-        for dep_name, dep_desc in critical_deps.items():
+        for dep_name, dep_desc in package_descriptions.items():
             try:
                 module = importlib.import_module(dep_name)
                 version = getattr(module, '__version__', 'unknown')
@@ -345,70 +354,84 @@ class SystemValidatorProduction:
         
         return permissions_ok
     
-    def test_openai_configuration(self) -> bool:
-        """Test configuration OpenAI"""
-        self.print_header("🤖 CONFIGURATION OPENAI")
+    def test_ollama_configuration(self) -> bool:
+        """Test configuration Ollama local"""
+        self.print_header("🤖 CONFIGURATION OLLAMA LOCAL")
         
-        # Test import OpenAI
+        # Test connexion Ollama
         try:
-            from openai import OpenAI
-            self.log_result("Import OpenAI", True, "Nouvelle API détectée", critical=False)
+            import requests
+            response = requests.get("http://localhost:11434/api/tags", timeout=5)
+            
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                model_names = [m["name"] for m in models]
+                
+                self.log_result("Connexion Ollama", True, 
+                              f"{len(models)} modèles disponibles", critical=False)
+                
+                # Vérifier modèles recommandés
+                recommended = ["mistral:7b", "llama3:8b", "phi3:mini"]
+                available_recommended = [m for m in recommended if m in model_names]
+                
+                if available_recommended:
+                    self.log_result("Modèles recommandés", True,
+                                  f"{len(available_recommended)}/{len(recommended)} disponibles", 
+                                  critical=False)
+                else:
+                    self.log_result("Modèles recommandés", False,
+                                  "Aucun modèle recommandé installé", critical=True)
+                    self.recommendations.append("Installer modèles: ollama pull mistral:7b")
+                
+                # Test génération simple
+                try:
+                    test_data = {
+                        "model": model_names[0] if model_names else "mistral:7b",
+                        "prompt": "Say hello briefly",
+                        "stream": False
+                    }
+                    
+                    test_response = requests.post("http://localhost:11434/api/generate", 
+                                                json=test_data, timeout=10)
+                    
+                    if test_response.status_code == 200:
+                        result = test_response.json()
+                        if "response" in result and result["response"].strip():
+                            self.log_result("Test génération", True, 
+                                          "Ollama répond correctement", critical=False)
+                            return True
+                        else:
+                            self.log_result("Test génération", False,
+                                          "Réponse vide d'Ollama", critical=True)
+                    else:
+                        self.log_result("Test génération", False,
+                                      f"Erreur HTTP {test_response.status_code}", critical=True)
+                
+                except Exception as e:
+                    self.log_result("Test génération", False, str(e), critical=True)
+                    
+            else:
+                self.log_result("Connexion Ollama", False,
+                              f"HTTP {response.status_code}", critical=True)
+                self.recommendations.append("Démarrer Ollama: ollama serve")
+                return False
+                
+        except requests.exceptions.ConnectionError:
+            self.log_result("Connexion Ollama", False, 
+                          "Ollama non démarré", critical=True)
+            self.recommendations.append("Démarrer Ollama: ollama serve")
+            return False
+            
         except ImportError:
-            self.log_result("Import OpenAI", False, "Package non installé", critical=True)
+            self.log_result("Module requests", False, 
+                          "requests non installé", critical=True)
             return False
-        
-        # Test clé API
-        api_key = None
-        
-        # Chercher clé dans variables d'environnement
-        api_key = os.getenv('OPENAI_API_KEY')
-        
-        # Chercher dans config si disponible
-        if not api_key:
-            try:
-                from config import config
-                api_key = config.ai.OPENAI_API_KEY
-            except ImportError:
-                pass
-        
-        if not api_key or api_key == "your-api-key-here":
-            self.log_result(
-                "Clé API OpenAI",
-                False,
-                "Non configurée",
-                critical=False,
-                details={
-                    "Solution 1": "export OPENAI_API_KEY='votre-clé'",
-                    "Solution 2": "Configurer dans config.py"
-                }
-            )
-            return False
-        
-        # Test de connectivité (optionnel)
-        try:
-            client = OpenAI(api_key=api_key)
-            # Test très léger
-            self.log_result("Client OpenAI", True, "Client initialisé", critical=False)
-            
-            # Ne pas faire d'appel API réel pour éviter les coûts
-            self.log_result(
-                "Test API",
-                True,
-                "Configuration valide (test non effectué)",
-                critical=False,
-                details={"Note": "Appel API non testé pour éviter les coûts"}
-            )
-            
-            return True
             
         except Exception as e:
-            self.log_result(
-                "Client OpenAI",
-                False,
-                str(e)[:50],
-                critical=False
-            )
+            self.log_result("Configuration Ollama", False, str(e), critical=True)
             return False
+            
+        return True
     
     def test_ui_capabilities(self) -> bool:
         """Test capacités interface utilisateur"""
@@ -523,7 +546,7 @@ class SystemValidatorProduction:
             'optional_deps': self.test_optional_dependencies(),
             'performance': self.test_performance_system(),
             'permissions': self.test_permissions(),
-            'openai_config': self.test_openai_configuration(),
+            'ollama_config': self.test_ollama_configuration(),
             'ui_capabilities': self.test_ui_capabilities(),
             'project_structure': self.test_project_structure(),
             'core_modules': self.test_import_core_modules()

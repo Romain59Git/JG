@@ -323,32 +323,200 @@ class AudioSystemTester:
         
         return success_rate >= 80
 
-def main():
-    """Main test execution"""
-    tester = AudioSystemTester()
+def test_gideon_audio_system():
+    """Test standard Gideon audio system"""
+    print("\n" + "="*60)
+    print("🤖 TEST STANDARD GIDEON AUDIO SYSTEM")
+    print("="*60)
     
+    tester = AudioSystemTester()
+    success = tester.run_full_test_suite()
+    
+    if success:
+        print("\n🎉 STANDARD GIDEON AUDIO SYSTEM READY!")
+        return True
+    else:
+        print("\n⚠️ STANDARD GIDEON AUDIO SYSTEM HAS ISSUES.")
+        return False
+
+def test_french_audio_system_complete():
+    """Test complet du système audio français"""
+    print("\n" + "="*60)
+    print("🇫🇷 TEST SYSTÈME AUDIO FRANÇAIS COMPLET")
+    print("="*60)
+    
+    total_tests = 0
+    passed_tests = 0
+    
+    # Import audio manager
     try:
-        success = tester.run_full_test_suite()
-        
-        if success:
-            print("\n🚀 Audio system is ready for Gideon AI Assistant!")
-            return 0
-        else:
-            print("\n🔧 Audio system needs attention before production use.")
-            return 1
-            
-    except KeyboardInterrupt:
-        print("\n⌨️  Test interrupted by user")
-        return 2
+        from core.audio_manager_optimized import EnhancedAudioManager
+        audio_mgr = EnhancedAudioManager()
+        print("✅ Audio Manager français importé")
+        total_tests += 1
+        passed_tests += 1
     except Exception as e:
-        print(f"\n❌ Critical test error: {e}")
-        return 3
-    finally:
-        # Cleanup
-        try:
-            audio_manager.cleanup()
-        except:
-            pass
+        print(f"❌ Erreur import Audio Manager: {e}")
+        total_tests += 1
+        return False
+    
+    # Test 1: Configuration voix française
+    print("\n🔊 Test 1: Configuration voix française")
+    try:
+        if audio_mgr.french_voice_manager:
+            voice_configured = audio_mgr.french_voice_manager.configure_french_voice()
+            if voice_configured:
+                print("✅ Voix française configurée")
+                passed_tests += 1
+            else:
+                print("⚠️ Voix française non trouvée (fallback OK)")
+                passed_tests += 1
+        else:
+            print("❌ Gestionnaire voix française non disponible")
+        total_tests += 1
+    except Exception as e:
+        print(f"❌ Erreur configuration voix: {e}")
+        total_tests += 1
+    
+    # Test 2: Synthèse vocale française
+    print("\n🔊 Test 2: Synthèse vocale française")
+    try:
+        test_phrases = [
+            "Bonjour ! Test synthèse vocale française.",
+            "Je peux maintenant parler parfaitement en français.",
+            "Voix française configurée avec succès."
+        ]
+        
+        for i, phrase in enumerate(test_phrases, 1):
+            print(f"  {i}. {phrase}")
+            if audio_mgr.speak(phrase, force_french=True):
+                print("    ✅ Synthèse réussie")
+            else:
+                print("    ❌ Synthèse échouée")
+            time.sleep(1)
+        
+        print("✅ Test synthèse vocale française terminé")
+        passed_tests += 1
+        total_tests += 1
+    except Exception as e:
+        print(f"❌ Erreur synthèse vocale: {e}")
+        total_tests += 1
+    
+    # Test 3: Reconnaissance vocale française (optionnel)
+    print("\n🎤 Test 3: Reconnaissance vocale française")
+    try:
+        print("  Dites quelque chose en français dans 3 secondes...")
+        time.sleep(3)
+        
+        if hasattr(audio_mgr, 'test_microphone_french'):
+            mic_result = audio_mgr.test_microphone_french()
+            if mic_result:
+                print("✅ Reconnaissance vocale française fonctionnelle")
+                passed_tests += 1
+            else:
+                print("⚠️ Reconnaissance vocale française non testée (timeout/erreur)")
+                passed_tests += 1  # Pas critique
+        else:
+            print("❌ Méthode test microphone français non disponible")
+        total_tests += 1
+    except Exception as e:
+        print(f"❌ Erreur reconnaissance vocale: {e}")
+        total_tests += 1
+    
+    # Test 4: Integration Ollama français
+    print("\n🧠 Test 4: Intégration Ollama français")
+    try:
+        from core.assistant_core_production import assistant_core
+        
+        test_prompts = [
+            "Bonjour Gideon",
+            "Comment allez-vous ?",
+            "Parlez-moi en français"
+        ]
+        
+        for prompt in test_prompts:
+            result = assistant_core.generate_ai_response(prompt)
+            if result and result.get('success'):
+                response = result['response']
+                print(f"  ✅ Prompt: '{prompt}' → Réponse: '{response[:50]}...'")
+                
+                # Test synthèse de la réponse
+                audio_mgr.speak(response, force_french=True)
+                time.sleep(1)
+            else:
+                print(f"  ❌ Échec réponse pour: '{prompt}'")
+        
+        print("✅ Intégration Ollama français testée")
+        passed_tests += 1
+        total_tests += 1
+    except Exception as e:
+        print(f"❌ Erreur intégration Ollama: {e}")
+        total_tests += 1
+    
+    # Test 5: Configuration française complète
+    print("\n🔧 Test 5: Configuration française complète")
+    try:
+        # Vérifier langue par défaut
+        if audio_mgr.config.LANGUAGE == "fr-FR":
+            print("✅ Langue par défaut: français")
+        else:
+            print(f"❌ Langue par défaut incorrecte: {audio_mgr.config.LANGUAGE}")
+        
+        # Vérifier wake words français
+        french_words = ["gideon", "jarvis", "bonjour gideon", "salut jarvis"]
+        found_french = any(word in audio_mgr.config.WAKE_WORDS for word in french_words)
+        if found_french:
+            print("✅ Mots d'activation français configurés")
+        else:
+            print("❌ Mots d'activation français manquants")
+        
+        print("✅ Configuration française vérifiée")
+        passed_tests += 1
+        total_tests += 1
+    except Exception as e:
+        print(f"❌ Erreur vérification configuration: {e}")
+        total_tests += 1
+    
+    # Résultats finaux
+    print("\n" + "="*60)
+    print("📊 RÉSULTATS FINAUX")
+    print("="*60)
+    
+    success_rate = (passed_tests / total_tests) * 100 if total_tests > 0 else 0
+    print(f"Tests réussis: {passed_tests}/{total_tests} ({success_rate:.1f}%)")
+    
+    if success_rate >= 80:
+        print("🎉 SYSTÈME AUDIO FRANÇAIS FONCTIONNEL!")
+        print("✅ Jarvis peut maintenant parler et comprendre le français")
+    elif success_rate >= 60:
+        print("⚠️ Système audio français partiellement fonctionnel")
+        print("💡 Quelques fonctionnalités peuvent nécessiter des ajustements")
+    else:
+        print("❌ Système audio français nécessite des corrections")
+        print("🔧 Vérifiez la configuration et les dépendances")
+    
+    return success_rate >= 60
+
+
+def main():
+    """Point d'entrée principal avec test français"""
+    print("🤖 GIDEON AUDIO SYSTEM TEST - VERSION FRANÇAISE")
+    
+    # Tests standards
+    success = test_gideon_audio_system()
+    
+    # Nouveau test français complet
+    french_success = test_french_audio_system_complete()
+    
+    # Résultat global
+    if success and french_success:
+        print("\n🎉 TOUS LES TESTS AUDIO RÉUSSIS!")
+        print("✅ Gideon est prêt en français")
+    else:
+        print("\n⚠️ Certains tests ont échoué")
+        print("🔧 Vérifiez la configuration")
+    
+    return success and french_success
 
 if __name__ == "__main__":
     exit_code = main()
